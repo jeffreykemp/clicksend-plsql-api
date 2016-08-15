@@ -11,6 +11,28 @@ default_purge_msg_state       constant varchar2(100) := 'EXPIRED';
 default_max_retries           constant number := 10; --allow failures before giving up on a message
 default_retry_delay           constant number := 60; --wait seconds before trying this message again
 
+-- country (note: this list is not complete)
+country_australia             constant varchar2(2) := 'AU';
+country_france                constant varchar2(2) := 'FR';
+country_united_kingdom        constant varchar2(2) := 'GB';
+country_usa                   constant varchar2(2) := 'US';
+-- refer http://docs.clicksend.apiary.io/#reference/countries/country-collection/get-all-countries
+
+-- voice language (note: this list is not complete)
+voice_american                constant varchar2(10) := 'en-us'; -- male or female
+voice_australian              constant varchar2(10) := 'en-au'; -- male or female
+voice_british                 constant varchar2(10) := 'en-gb'; -- male or female
+voice_french                  constant varchar2(10) := 'fr-fr'; -- male or female
+voice_german                  constant varchar2(10) := 'de-de'; -- male or female
+voice_italian                 constant varchar2(10) := 'it-it'; -- male or female
+voice_japanese                constant varchar2(10) := 'ja-jp'; -- male or female
+voice_spanish                 constant varchar2(10) := 'es-es'; -- male or female
+-- refer http://docs.clicksend.apiary.io/#reference/voice/voice-languages/voice-languages
+
+-- voice gender
+voice_female                  constant varchar2(10) := 'female';
+voice_male                    constant varchar2(10) := 'male';
+
 -- init: set up clicksend parameters
 --   default is to not change the given parameter
 procedure init
@@ -19,12 +41,12 @@ procedure init
   ,p_api_url              in varchar2 := default_no_change
   ,p_wallet_path          in varchar2 := default_no_change
   ,p_wallet_password      in varchar2 := default_no_change
-  ,p_log_retention_days   in number := null
   ,p_default_sender       in varchar2 := default_no_change
   ,p_default_country      in varchar2 := default_no_change
   ,p_default_voice_lang   in varchar2 := default_no_change
   ,p_default_voice_gender in varchar2 := default_no_change
   ,p_voice_preamble       in varchar2 := default_no_change
+  ,p_log_retention_days   in number := null
   ,p_queue_expiration     in number := null
   );
 
@@ -53,7 +75,7 @@ procedure send_mms
   );
 
 procedure send_voice
-  (p_mobile         in varchar2
+  (p_phone_no       in varchar2
   ,p_message        in varchar2
   ,p_voice_lang     in varchar2 := null
   ,p_voice_gender   in varchar2 := null

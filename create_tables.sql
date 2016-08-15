@@ -10,7 +10,7 @@ create table clicksend_msg_log
   , schedule_dt         date
   , sent_ts             timestamp
   , sender              varchar2(20 char)
-  , mobile              varchar2(20 char)
+  , recipient           varchar2(20 char)
   , subject             varchar2(4000) -- for mms
   , message             varchar2(4000)
   , media_file          varchar2(4000) -- for mms

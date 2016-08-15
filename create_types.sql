@@ -8,7 +8,7 @@ create type t_clicksend_msg is object
   , requested_ts  timestamp
   , schedule_dt   date
   , sender        varchar2(20)
-  , mobile        varchar2(20)
+  , recipient     varchar2(20)
   , subject       varchar2(4000) -- for mms
   , message       varchar2(4000)
   , media_file    varchar2(4000) -- for mms

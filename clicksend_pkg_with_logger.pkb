@@ -1,4 +1,7 @@
 create or replace package body clicksend_pkg as
+-- clicksend package instrumented with Logger
+
+scope_prefix constant varchar2(31) := lower($$plsql_unit) || '.';
 
 default_log_retention_days constant number := 30;
 default_queue_expiration   constant integer := 24 * 60 * 60; -- failed messages expire from the queue after 24 hours
@@ -57,7 +60,13 @@ procedure set_setting
   (p_name  in varchar2
   ,p_value in varchar2
   ) is
+  scope logger_logs.scope%type := scope_prefix || 'set_setting';
+  params logger.tab_param;
 begin
+  logger.append_param(params,'p_name',p_name);
+  logger.append_param(params,'p_value',case when p_value is null then 'null' else 'not null' end);
+  logger.log('START', scope, null, params);
+  
   assert(p_name is not null, 'p_name cannot be null');
   
   merge into clicksend_settings t
@@ -71,8 +80,16 @@ begin
     insert (setting_name, setting_value)
     values (s.setting_name, s.setting_value);
   
+  logger.log('MERGE clicksend_settings: ' || SQL%ROWCOUNT, scope, null, params);
+  
+  logger.log('commit', scope, null, params);
   commit;
 
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end set_setting;
 
 -- get a setting
@@ -82,8 +99,13 @@ function setting
   (p_name    in varchar2
   ,p_default in varchar2 := null
   ) return varchar2 result_cache is
+  scope logger_logs.scope%type := scope_prefix || 'setting';
+  params logger.tab_param;
   p_value clicksend_settings.setting_value%type;
 begin
+  logger.append_param(params,'p_name',p_name);
+  logger.log('START', scope, null, params);
+
   assert(p_name is not null, 'p_name cannot be null');
   
   select s.setting_value
@@ -91,14 +113,19 @@ begin
   from   clicksend_settings s
   where  s.setting_name = setting.p_name;
 
+  logger.log('END', scope, null, params);
   return nvl(p_value, p_default);
 exception
   when no_data_found then
     if p_default is not null then
       return p_default;
     else
+      logger.log_error('No Data Found', scope, null, params);
       raise_application_error(-20000, 'clicksend setting not set "' || p_name || '" - please setup using ' || $$plsql_unit || '.init()');
     end if;
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end setting;
 
 function api_url return varchar2 is
@@ -111,11 +138,34 @@ begin
   return to_number(setting(setting_log_retention_days, p_default => default_log_retention_days));
 end log_retention_days;
 
+procedure log_headers (resp in out nocopy utl_http.resp) is
+  scope logger_logs.scope%type := scope_prefix || 'log_headers';
+  params logger.tab_param;
+  name  varchar2(256);
+  value varchar2(1024);
+begin
+  logger.log('START', scope, null, params);
+
+  for i in 1..utl_http.get_header_count(resp) loop
+    utl_http.get_header(resp, i, name, value);
+    logger.log(name || ': ' || value, scope, null, params);
+  end loop;
+
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
+end log_headers;
+
 procedure set_wallet is
+  scope logger_logs.scope%type := scope_prefix || 'set_wallet';
+  params logger.tab_param;
   wallet_path     varchar2(4000);
   wallet_password varchar2(4000);
 begin
-
+  logger.log('START', scope, null, params);
+  
   wallet_path := setting(setting_wallet_path, p_default => default_null);
   wallet_password := setting(setting_wallet_password, p_default => default_null);
 
@@ -123,12 +173,20 @@ begin
     utl_http.set_wallet(wallet_path, wallet_password);
   end if;
 
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end set_wallet;
 
 function get_response (resp in out nocopy utl_http.resp) return clob is
+  scope logger_logs.scope%type := scope_prefix || 'get_response';
+  params logger.tab_param;
   buf varchar2(32767);
   ret clob := empty_clob;
 begin
+  logger.log('START', scope, null, params);
   
   dbms_lob.createtemporary(ret, true);
 
@@ -143,7 +201,12 @@ begin
   end;
   utl_http.end_response(resp);
 
+  logger.log('END', scope, ret, params);
   return ret;
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end get_response;
 
 function get_json
@@ -154,11 +217,21 @@ function get_json
   ,p_pwd    in varchar2 := null
   ,p_accept in varchar2 := null
   ) return clob is
+  scope logger_logs.scope%type := scope_prefix || 'get_json';
+  params logger.tab_param;
   url   varchar2(4000) := p_url;
   req   utl_http.req;
   resp  utl_http.resp;
   ret   clob;
 begin
+  logger.append_param(params,'p_url',p_url);
+  logger.append_param(params,'p_method',p_method);
+  logger.append_param(params,'p_data',p_data);
+  logger.append_param(params,'p_user',p_user);
+  logger.append_param(params,'p_pwd',CASE WHEN p_pwd IS NOT NULL THEN '(not null)' ELSE 'NULL' END);
+  logger.append_param(params,'p_accept',p_accept);
+  logger.log('START', scope, null, params);
+
   assert(p_url is not null, 'get_json: p_url cannot be null');
     
   set_wallet;
@@ -166,12 +239,15 @@ begin
   req := utl_http.begin_request(url => p_url, method => p_method);
 
   if p_user is not null or p_pwd is not null then
+    logger.log('utl_http.set_authentication', scope, null, params);
     utl_http.set_authentication(req, p_user, p_pwd);
   end if;
 
   if p_data is not null then
+    logger.log('utl_http set headers Content-Type/Length', scope, null, params);
     utl_http.set_header (req,'Content-Type','application/json');
     utl_http.set_header (req,'Content-Length',length(p_data));
+    logger.log('utl_http.write_text', scope, null, params);
     utl_http.write_text (req,p_data);
   end if;
   
@@ -180,6 +256,9 @@ begin
   end if;
 
   resp := utl_http.get_response(req);
+  logger.log('HTTP response: ' || resp.status_code || ' ' || resp.reason_phrase, scope, null, params);
+
+  log_headers(resp);
 
   if resp.status_code != '200' then
     raise_application_error(-20000, 'get_json call failed ' || resp.status_code || ' ' || resp.reason_phrase || ' [' || url || ']');
@@ -187,7 +266,12 @@ begin
 
   ret := get_response(resp);
 
+  logger.log('END', scope, ret, params);
   return ret;
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end get_json;
 
 function get_epoch (p_date in date) return number as
@@ -198,6 +282,8 @@ begin
 end get_epoch;
 
 procedure send_msg (p_payload in out nocopy t_clicksend_msg) as
+  scope logger_logs.scope%type := scope_prefix || 'send_msg';
+  params logger.tab_param;
   payload varchar2(32767);
   resp_text varchar2(32767);
   
@@ -206,6 +292,8 @@ procedure send_msg (p_payload in out nocopy t_clicksend_msg) as
     pragma autonomous_transaction;
     log clicksend_msg_log%rowtype;
   begin
+    logger.log('log_response', scope, null, params);
+
     log.sent_ts            := systimestamp;
     log.message_type       := p_payload.message_type;
     log.requested_ts       := p_payload.requested_ts;
@@ -231,16 +319,34 @@ procedure send_msg (p_payload in out nocopy t_clicksend_msg) as
       log.clicksend_cost      := apex_json.get_number('data.total_price');
     exception
       when others then
-        -- response might not be valid json
+        -- log the error but don't stop the logging
+        logger.log_error(SQLERRM, scope, resp_text, params);
     end;
 
     insert into clicksend_msg_log values log;
+    logger.log('inserted clicksend_msg_log: ' || sql%rowcount, scope, null, params);
 
+    logger.log('commit', scope, null, params);
     commit;
     
   end log_response;
 
-begin  
+begin
+  logger.append_param(params,'p_payload.message_type',p_payload.message_type);
+  logger.append_param(params,'p_payload.requested_ts',p_payload.requested_ts);
+  logger.append_param(params,'p_payload.schedule_dt',p_payload.schedule_dt);
+  logger.append_param(params,'p_payload.sender',p_payload.sender);
+  logger.append_param(params,'p_payload.recipient',p_payload.recipient);
+  logger.append_param(params,'p_payload.subject',p_payload.subject);
+  logger.append_param(params,'p_payload.message',p_payload.message);
+  logger.append_param(params,'p_payload.media_file',p_payload.media_file);
+  logger.append_param(params,'p_payload.voice_lang',p_payload.voice_lang);
+  logger.append_param(params,'p_payload.voice_gender',p_payload.voice_gender);
+  logger.append_param(params,'p_payload.country',p_payload.country);
+  logger.append_param(params,'p_payload.reply_email',p_payload.reply_email);
+  logger.append_param(params,'p_payload.custom_string',p_payload.custom_string);
+  logger.log('START', scope, null, params);
+  
   assert(p_payload.message_type in (message_type_sms, message_type_mms, message_type_voice)
         ,'message_type must be sms, mms or voice');
   
@@ -296,6 +402,11 @@ begin
   
   log_response;
 
+  logger.log('END', scope);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end send_msg;
 
 -- convert '0408123456' to '+61408123456'
@@ -303,15 +414,24 @@ function local_to_intnl_au
   (p_mobile  in varchar2
   ,p_country in varchar2
   ) return varchar2 is
+  scope logger_logs.scope%type := scope_prefix || 'local_to_intnl_au';
+  params logger.tab_param;
   ret varchar2(20) := substr(p_mobile, 1, 20);
 begin
+  logger.append_param(params,'p_mobile',p_mobile);  
+  logger.log('START', scope, null, params);
 
   if substr(ret, 1, 1) != '+'
   and p_country = 'AU' then
     ret := '+61' || substr(ret, 2);
   end if;
 
+  logger.log('END', scope);
   return ret;
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end local_to_intnl_au;
 
 --------------------------------------------------------------------------------
@@ -332,8 +452,23 @@ procedure init
   ,p_log_retention_days   in number := null
   ,p_queue_expiration     in number := null
   ) is
+  scope logger_logs.scope%type := scope_prefix || 'init';
+  params logger.tab_param;
 begin
-
+  logger.append_param(params,'p_clicksend_username',p_clicksend_username);
+  logger.append_param(params,'p_clicksend_secret_key',case when p_clicksend_secret_key is null then 'null' else 'not null' end);
+  logger.append_param(params,'p_api_url',p_api_url);
+  logger.append_param(params,'p_wallet_path',p_wallet_path);
+  logger.append_param(params,'p_wallet_password',case when p_wallet_password is null then 'null' else 'not null' end);
+  logger.append_param(params,'p_log_retention_days',p_log_retention_days);
+  logger.append_param(params,'p_default_sender',p_default_sender);
+  logger.append_param(params,'p_default_country',p_default_country);
+  logger.append_param(params,'p_default_voice_lang',p_default_voice_lang);
+  logger.append_param(params,'p_default_voice_gender',p_default_voice_gender);
+  logger.append_param(params,'p_voice_preamble',p_voice_preamble);
+  logger.append_param(params,'p_queue_expiration',p_queue_expiration);  
+  logger.log('START', scope, null, params);
+  
   if nvl(p_clicksend_username,'*') != default_no_change then
     set_setting(setting_clicksend_username, p_clicksend_username);
   end if;
@@ -382,6 +517,11 @@ begin
     set_setting(setting_queue_expiration, p_queue_expiration);
   end if;
 
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end init;
 
 procedure send_sms
@@ -394,13 +534,25 @@ procedure send_sms
   ,p_custom_string in varchar2 := null
   ,p_priority      in number   := default_priority -- lower numbers are processed first
   ) is
+  scope logger_logs.scope%type := scope_prefix || 'send_sms';
+  params logger.tab_param;
   enq_opts        dbms_aq.enqueue_options_t;
   enq_msg_props   dbms_aq.message_properties_t;
   payload         t_clicksend_msg;
   msgid           raw(16);
   sender          varchar2(100);
   country         varchar2(10);
-begin  
+begin
+  logger.append_param(params,'p_mobile',p_mobile);
+  logger.append_param(params,'p_message',p_message);
+  logger.append_param(params,'p_sender',p_sender);
+  logger.append_param(params,'p_schedule_dt',p_schedule_dt);
+  logger.append_param(params,'p_country',p_country);
+  logger.append_param(params,'p_reply_email',p_reply_email);
+  logger.append_param(params,'p_custom_string',p_custom_string);
+  logger.append_param(params,'p_priority',p_priority);
+  logger.log('START', scope, null, params);
+  
   assert(p_mobile is not null, 'p_mobile cannot be null');
   
   if substr(p_mobile, 1, 1) = '+' then
@@ -454,6 +606,13 @@ begin
     ,msgid              => msgid
     );
 
+  logger.log('msg queued ' || msgid, scope, null, params);
+
+  logger.log('END', scope);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end send_sms;
 
 procedure send_mms
@@ -468,6 +627,8 @@ procedure send_mms
   ,p_custom_string  in varchar2 := null
   ,p_priority       in number   := default_priority -- lower numbers are processed first
   ) is
+  scope logger_logs.scope%type := scope_prefix || 'send_mms';
+  params logger.tab_param;
   enq_opts        dbms_aq.enqueue_options_t;
   enq_msg_props   dbms_aq.message_properties_t;
   payload         t_clicksend_msg;
@@ -475,6 +636,18 @@ procedure send_mms
   sender          varchar2(100);
   country         varchar2(10);
 begin
+  logger.append_param(params,'p_mobile',p_mobile);
+  logger.append_param(params,'p_subject',p_subject);
+  logger.append_param(params,'p_message',p_message);
+  logger.append_param(params,'p_media_file_url',p_media_file_url);
+  logger.append_param(params,'p_sender',p_sender);
+  logger.append_param(params,'p_schedule_dt',p_schedule_dt);
+  logger.append_param(params,'p_country',p_country);
+  logger.append_param(params,'p_reply_email',p_reply_email);
+  logger.append_param(params,'p_custom_string',p_custom_string);
+  logger.append_param(params,'p_priority',p_priority);
+  logger.log('START', scope, null, params);
+  
   assert(p_mobile is not null, 'p_mobile cannot be null');
   assert(p_subject is not null, 'p_subject cannot be null');
   assert(p_media_file_url is not null, 'p_media_file_url cannot be null');
@@ -530,6 +703,13 @@ begin
     ,msgid              => msgid
     );
 
+  logger.log('msg queued ' || msgid, scope, null, params);
+
+  logger.log('END', scope);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end send_mms;
 
 procedure send_voice
@@ -542,6 +722,8 @@ procedure send_voice
   ,p_custom_string  in varchar2 := null
   ,p_priority       in number   := default_priority -- lower numbers are processed first
   ) is
+  scope logger_logs.scope%type := scope_prefix || 'send_voice';
+  params logger.tab_param;
   enq_opts        dbms_aq.enqueue_options_t;
   enq_msg_props   dbms_aq.message_properties_t;
   payload         t_clicksend_msg;
@@ -551,6 +733,16 @@ procedure send_voice
   voice_gender    varchar2(6);
   country         varchar2(10);
 begin
+  logger.append_param(params,'p_phone_no',p_phone_no);
+  logger.append_param(params,'p_message',p_message);
+  logger.append_param(params,'p_voice_lang',p_voice_lang);
+  logger.append_param(params,'p_voice_gender',p_voice_gender);
+  logger.append_param(params,'p_schedule_dt',p_schedule_dt);
+  logger.append_param(params,'p_country',p_country);
+  logger.append_param(params,'p_custom_string',p_custom_string);
+  logger.append_param(params,'p_priority',p_priority);
+  logger.log('START', scope, null, params);
+  
   assert(p_phone_no is not null, 'p_phone_no cannot be null');
   
   if substr(p_phone_no, 1, 1) = '+' then
@@ -602,12 +794,22 @@ begin
     ,msgid              => msgid
     );
 
+  logger.log('msg queued ' || msgid, scope, null, params);
+
+  logger.log('END', scope);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end send_voice;
 
 function get_account_details return varchar2 is
 pragma autonomous_transaction;
+  scope logger_logs.scope%type := scope_prefix || 'get_account_details';
+  params logger.tab_param;
   v_json  varchar2(32767);
 begin
+  logger.log('START', scope, null, params);
 
   v_json := get_json
     (p_url    => api_url || 'account'
@@ -617,13 +819,21 @@ begin
     ,p_accept => 'application/json'
     );
 
+  logger.log('END', scope);
   return v_json;
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end get_account_details;
 
 function get_credit_balance return number is
+  scope logger_logs.scope%type := scope_prefix || 'get_credit_balance';
+  params logger.tab_param;
   v_json   varchar2(4000);
   v_bal    varchar2(4000);
 begin
+  logger.log('START', scope, null, params);
 
   v_json := get_account_details;
 
@@ -631,14 +841,27 @@ begin
 
   v_bal := apex_json.get_varchar2('data.balance');
 
+  logger.log('END', scope);
   return to_number(v_bal);
+exception
+  when value_error then
+    logger.log_error('get_credit_balance: unable to convert balance "' || v_bal || '"', scope, null, params);
+    raise;
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end get_credit_balance;
 
 procedure create_queue
   (p_max_retries in number := default_max_retries
   ,p_retry_delay in number := default_retry_delay
   ) is
+  scope logger_logs.scope%type := scope_prefix || 'create_queue';
+  params logger.tab_param;
 begin
+  logger.append_param(params,'p_max_retries',p_max_retries);
+  logger.append_param(params,'p_retry_delay',p_retry_delay);
+  logger.log('START', scope, null, params);
 
   dbms_aqadm.create_queue_table
     (queue_table        => queue_table
@@ -655,10 +878,18 @@ begin
 
   dbms_aqadm.start_queue (queue_name);
 
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end create_queue;
 
 procedure drop_queue is
+  scope logger_logs.scope%type := scope_prefix || 'drop_queue';
+  params logger.tab_param;
 begin
+  logger.log('START', scope, null, params);
 
   dbms_aqadm.stop_queue (queue_name);
   
@@ -666,11 +897,20 @@ begin
   
   dbms_aqadm.drop_queue_table (queue_table);  
 
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end drop_queue;
 
 procedure purge_queue (p_msg_state IN VARCHAR2 := default_purge_msg_state) is
+  scope logger_logs.scope%type := scope_prefix || 'purge_queue';
+  params logger.tab_param;
   r_opt dbms_aqadm.aq$_purge_options_t;
 begin
+  logger.append_param(params,'p_msg_state',p_msg_state);
+  logger.log('START', scope, null, params);
 
   dbms_aqadm.purge_queue_table
     (queue_table     => queue_table
@@ -680,10 +920,17 @@ begin
                         end
     ,purge_options   => r_opt);
 
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end purge_queue;
 
 procedure push_queue
   (p_asynchronous in boolean := false) as
+  scope logger_logs.scope%type := scope_prefix || 'push_queue';
+  params logger.tab_param;
   r_dequeue_options    dbms_aq.dequeue_options_t;
   r_message_properties dbms_aq.message_properties_t;
   msgid                raw(16);
@@ -691,6 +938,8 @@ procedure push_queue
   dequeue_count        integer := 0;
   job                  binary_integer;
 begin
+  logger.append_param(params,'p_asynchronous',p_asynchronous);
+  logger.log('START', scope, null, params);
 
   if p_asynchronous then
   
@@ -701,10 +950,12 @@ begin
       ,what => $$PLSQL_UNIT || '.push_queue;'
       );
       
+    logger.log('submitted job=' || job, scope, null, params);
       
   else
     
     -- commit any messages requested in the current session
+    logger.log('commit', scope, null, params);
     commit;
     
     r_dequeue_options.wait := dbms_aq.no_wait;
@@ -721,10 +972,15 @@ begin
         ,msgid              => msgid
         );
       
+      logger.log('payload priority: ' || r_message_properties.priority
+        || ' enqeued: ' || to_char(r_message_properties.enqueue_time,'dd/mm/yyyy hh24:mi:ss')
+        || ' attempts: ' || r_message_properties.attempts
+        , scope, null, params);
   
       -- process the message
       send_msg (p_payload => payload);  
   
+      logger.log('commit', scope, null, params);
       commit; -- the queue will treat the message as succeeded
       
       -- don't bite off everything in one go
@@ -734,11 +990,23 @@ begin
 
   end if;
 
+  logger.log('END', scope, null, params);
+exception
+  when e_no_queue_data then
+    logger.log('END push_queue finished count=' || dequeue_count, scope, null, params);
+  when others then
+    rollback; -- the queue will treat the message as failed
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end push_queue;
 
 procedure create_job
   (p_repeat_interval in varchar2 := default_repeat_interval) is
+  scope logger_logs.scope%type := scope_prefix || 'create_job';
+  params logger.tab_param;
 begin
+  logger.append_param(params,'p_repeat_interval',p_repeat_interval);
+  logger.log('START', scope, null, params);
 
   assert(p_repeat_interval is not null, 'create_job: p_repeat_interval cannot be null');
 
@@ -754,10 +1022,18 @@ begin
 
   dbms_scheduler.enable(job_name);
 
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end create_job;
 
 procedure drop_job is
+  scope logger_logs.scope%type := scope_prefix || 'drop_job';
+  params logger.tab_param;
 begin
+  logger.log('START', scope, null, params);
 
   begin
     dbms_scheduler.stop_job (job_name);
@@ -770,24 +1046,47 @@ begin
   
   dbms_scheduler.drop_job (job_name);
 
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end drop_job;
 
 procedure purge_logs (p_log_retention_days in number := null) is
+  scope logger_logs.scope%type := scope_prefix || 'purge_logs';
+  params logger.tab_param;
   l_log_retention_days number;
 begin
+  logger.append_param(params,'p_log_retention_days',p_log_retention_days);
+  logger.log('START', scope, null, params);
 
   l_log_retention_days := nvl(p_log_retention_days, log_retention_days);
+  logger.append_param(params,'l_log_retention_days',l_log_retention_days);
   
   delete clicksend_msg_log
   where requested_ts < sysdate - l_log_retention_days;
   
+  logger.log_info('DELETED clicksend_msg_log: ' || SQL%ROWCOUNT, scope, null, params);
+  
+  logger.log('commit', scope, null, params);
   commit;
 
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end purge_logs;
 
 procedure create_purge_job
   (p_repeat_interval in varchar2 := default_purge_repeat_interval) is
+  scope logger_logs.scope%type := scope_prefix || 'create_purge_job';
+  params logger.tab_param;
 begin
+  logger.append_param(params,'p_repeat_interval',p_repeat_interval);
+  logger.log('START', scope, null, params);
+
   assert(p_repeat_interval is not null, 'create_purge_job: p_repeat_interval cannot be null');
 
   dbms_scheduler.create_job
@@ -802,10 +1101,18 @@ begin
 
   dbms_scheduler.enable(purge_job_name);
 
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end create_purge_job;
 
 procedure drop_purge_job is
+  scope logger_logs.scope%type := scope_prefix || 'drop_purge_job';
+  params logger.tab_param;
 begin
+  logger.log('START', scope, null, params);
 
   begin
     dbms_scheduler.stop_job (purge_job_name);
@@ -818,6 +1125,11 @@ begin
   
   dbms_scheduler.drop_job (purge_job_name);
 
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
 end drop_purge_job;
 
 end clicksend_pkg;
