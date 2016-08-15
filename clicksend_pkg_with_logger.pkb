@@ -1,4 +1,5 @@
 create or replace package body clicksend_pkg as
+-- https://github.com/jeffreykemp/clicksend-plsql-api
 -- clicksend package instrumented with Logger
 
 scope_prefix constant varchar2(31) := lower($$plsql_unit) || '.';
@@ -649,7 +650,10 @@ begin
   logger.log('START', scope, null, params);
   
   assert(p_mobile is not null, 'p_mobile cannot be null');
+
   assert(p_subject is not null, 'p_subject cannot be null');
+  assert(length(p_subject) <= 20, 'maximum subject length is 20 (' || length(p_subject) || ')');
+
   assert(p_media_file_url is not null, 'p_media_file_url cannot be null');
   
   if substr(p_mobile, 1, 1) = '+' then

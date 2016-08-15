@@ -1,6 +1,7 @@
 create or replace package clicksend_pkg as
 /* clicksend API v0.1
-  by Jeffrey Kemp
+   https://github.com/jeffreykemp/clicksend-plsql-api
+   by Jeffrey Kemp
 */
 
 default_no_change             constant varchar2(4000) := '*NO-CHANGE*';

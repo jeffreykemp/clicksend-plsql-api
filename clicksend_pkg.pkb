@@ -1,4 +1,5 @@
 create or replace package body clicksend_pkg as
+--https://github.com/jeffreykemp/clicksend-plsql-api
 
 default_log_retention_days constant number := 30;
 default_queue_expiration   constant integer := 24 * 60 * 60; -- failed messages expire from the queue after 24 hours
@@ -476,7 +477,10 @@ procedure send_mms
   country         varchar2(10);
 begin
   assert(p_mobile is not null, 'p_mobile cannot be null');
+
   assert(p_subject is not null, 'p_subject cannot be null');
+  assert(length(p_subject) <= 20, 'maximum subject length is 20 (' || length(p_subject) || ')');
+
   assert(p_media_file_url is not null, 'p_media_file_url cannot be null');
   
   if substr(p_mobile, 1, 1) = '+' then
