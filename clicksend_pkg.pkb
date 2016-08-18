@@ -233,6 +233,7 @@ procedure send_msg (p_payload in out nocopy t_clicksend_msg) as
     exception
       when others then
         -- response might not be valid json
+        null; -- preferably we'd log the error somewhere...
     end;
 
     insert into clicksend_msg_log values log;
