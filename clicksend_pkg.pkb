@@ -739,6 +739,10 @@ begin
 
   end if;
 
+exception
+  when e_no_queue_data then
+    -- no more messages to process
+    null;
 end push_queue;
 
 procedure create_job
