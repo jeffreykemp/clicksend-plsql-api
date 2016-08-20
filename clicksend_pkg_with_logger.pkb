@@ -1,11 +1,11 @@
 create or replace package body clicksend_pkg as
--- https://github.com/jeffreykemp/clicksend-plsql-api
--- clicksend package instrumented with Logger
+/* Clicksend API v0.2
+  https://github.com/jeffreykemp/clicksend-plsql-api
+  by Jeffrey Kemp
+  Instrumented using Logger https://github.com/OraOpenSource/Logger
+*/
 
 scope_prefix constant varchar2(31) := lower($$plsql_unit) || '.';
-
-default_log_retention_days constant number := 30;
-default_queue_expiration   constant integer := 24 * 60 * 60; -- failed messages expire from the queue after 24 hours
 
 queue_name             constant varchar2(30) := sys_context('userenv','current_schema')||'.clicksend_queue';
 queue_table            constant varchar2(30) := sys_context('userenv','current_schema')||'.clicksend_queue_tab';
@@ -15,10 +15,13 @@ payload_type           constant varchar2(30) := sys_context('userenv','current_s
 max_dequeue_count      constant integer := 1000; -- max messages processed by push_queue in one go
 
 -- defaults to use if init() not used to set these settings
-default_country        constant varchar2(10)  := 'AU';
-default_api_url        constant varchar2(200) := 'https://rest.clicksend.com/v3/';
-default_voice_gender   constant varchar2(6)   := 'female';
-default_voice_preamble constant varchar2(500) := '.....'; -- add a pause at the start
+default_country            constant varchar2(10)  := 'AU';
+default_api_url            constant varchar2(200) := 'https://rest.clicksend.com/v3/';
+default_voice_lang         constant varchar2(10)  := 'en-au'; -- aussie
+default_voice_gender       constant varchar2(6)   := 'female';
+default_voice_preamble     constant varchar2(500) := '.....'; -- add a pause at the start
+default_log_retention_days constant number := 30;
+default_queue_expiration   constant integer := 24 * 60 * 60; -- failed messages expire from the queue after 24 hours
 
 -- message types
 message_type_sms       constant varchar2(20) := 'sms';
@@ -38,9 +41,12 @@ setting_default_voice_lang     constant varchar2(100) := 'default_voice_lang';
 setting_default_voice_gender   constant varchar2(100) := 'default_voice_gender';
 setting_voice_preamble         constant varchar2(100) := 'voice_preamble';
 setting_queue_expiration       constant varchar2(100) := 'queue_expiration';
+setting_prod_instance_name     constant varchar2(100) := 'prod_instance_name';
+setting_non_prod_recipient     constant varchar2(100) := 'non_prod_recipient';
 
--- dummy "null" value
-default_null constant varchar2(100) := '*NULL*';
+type t_key_val_arr is table of varchar2(4000) index by varchar2(100);
+
+g_setting t_key_val_arr;
 
 e_no_queue_data       exception;
 pragma exception_init (e_no_queue_data, -25228);
@@ -93,13 +99,48 @@ exception
     raise;
 end set_setting;
 
+-- retrieve all the settings for a normal session
+procedure load_settings is
+  scope logger_logs.scope%type := scope_prefix || 'load_settings';
+  params logger.tab_param;
+begin
+  logger.log('START', scope, null, params);
+  
+  -- set defaults first
+  g_setting(setting_api_url)              := default_api_url;
+  g_setting(setting_wallet_path)          := '';
+  g_setting(setting_wallet_password)      := '';
+  g_setting(setting_log_retention_days)   := default_log_retention_days;
+  g_setting(setting_default_sender)       := '';
+  g_setting(setting_default_country)      := default_country;
+  g_setting(setting_default_voice_lang)   := default_voice_lang;
+  g_setting(setting_default_voice_gender) := default_voice_gender;
+  g_setting(setting_voice_preamble)       := default_voice_preamble;
+  g_setting(setting_queue_expiration)     := default_queue_expiration;
+  g_setting(setting_prod_instance_name)   := '';
+  g_setting(setting_non_prod_recipient)   := '';
+
+  for r in (
+    select s.setting_name
+          ,s.setting_value
+    from   clicksend_settings s
+    ) loop
+    
+    g_setting(r.setting_name) := r.setting_value;
+    
+  end loop;
+
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
+end load_settings;
+
 -- get a setting
 -- if p_default is set, a null/not found will return the default value
 -- if p_default is null, a not found will raise an exception
-function setting
-  (p_name    in varchar2
-  ,p_default in varchar2 := null
-  ) return varchar2 result_cache is
+function setting (p_name in varchar2) return varchar2 is
   scope logger_logs.scope%type := scope_prefix || 'setting';
   params logger.tab_param;
   p_value clicksend_settings.setting_value%type;
@@ -109,16 +150,19 @@ begin
 
   assert(p_name is not null, 'p_name cannot be null');
   
-  select s.setting_value
-  into   p_value
-  from   clicksend_settings s
-  where  s.setting_name = setting.p_name;
+  -- prime the settings array for this session
+  if g_setting.count = 0 then
+    load_settings;
+  end if;
+  
+  p_value := g_setting(p_name);
 
   logger.log('END', scope, null, params);
   return nvl(p_value, p_default);
 exception
   when no_data_found then
     if p_default is not null then
+      logger.log('END default', scope, null, params);
       return p_default;
     else
       logger.log_error('No Data Found', scope, null, params);
@@ -129,17 +173,58 @@ exception
     raise;
 end setting;
 
-function api_url return varchar2 is
-begin
-  return setting(setting_api_url, p_default => default_api_url);
-end api_url;
-
 function log_retention_days return number is
 begin
-  return to_number(setting(setting_log_retention_days, p_default => default_log_retention_days));
+  return to_number(setting(setting_log_retention_days));
 end log_retention_days;
 
-procedure log_headers (resp in out nocopy utl_http.resp) is
+function get_global_name return varchar2 result_cache is
+  scope  logger_logs.scope%type := scope_prefix || 'get_global_name';
+  params logger.tab_param;
+  gn global_name.global_name%type;
+begin
+  logger.log('START', scope, null, params);
+
+  select g.global_name into gn from global_name g;
+
+  logger.log('END gn=' || gn, scope, null, params);
+  return gn;
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
+end get_global_name;
+
+procedure prod_check
+  (p_is_prod            out boolean
+  ,p_non_prod_recipient out varchar2
+  ) is
+  scope  logger_logs.scope%type := scope_prefix || 'prod_check';
+  params logger.tab_param;
+  prod_instance_name mailgun_settings.setting_value%type;
+begin
+  logger.log('START', scope, null, params);
+  
+  prod_instance_name := setting(setting_prod_instance_name);
+  
+  if prod_instance_name is not null then  
+    p_is_prod := prod_instance_name = get_global_name;
+  else
+    p_is_prod := true; -- if setting not set, we treat this as a prod env
+  end if;
+  
+  if not p_is_prod then
+    p_non_prod_recipient := setting(setting_non_prod_recipient);
+  end if;
+
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
+end prod_check;
+
+procedure log_headers (resp in out nocopy sys.utl_http.resp) is
   scope logger_logs.scope%type := scope_prefix || 'log_headers';
   params logger.tab_param;
   name  varchar2(256);
@@ -147,8 +232,8 @@ procedure log_headers (resp in out nocopy utl_http.resp) is
 begin
   logger.log('START', scope, null, params);
 
-  for i in 1..utl_http.get_header_count(resp) loop
-    utl_http.get_header(resp, i, name, value);
+  for i in 1..sys.utl_http.get_header_count(resp) loop
+    sys.utl_http.get_header(resp, i, name, value);
     logger.log(name || ': ' || value, scope, null, params);
   end loop;
 
@@ -167,11 +252,11 @@ procedure set_wallet is
 begin
   logger.log('START', scope, null, params);
   
-  wallet_path := setting(setting_wallet_path, p_default => default_null);
-  wallet_password := setting(setting_wallet_password, p_default => default_null);
+  wallet_path := setting(setting_wallet_path);
+  wallet_password := setting(setting_wallet_password);
 
-  if wallet_path != default_null or wallet_password != default_null then
-    utl_http.set_wallet(wallet_path, wallet_password);
+  if wallet_path is not null or wallet_password is not null then
+    sys.utl_http.set_wallet(wallet_path, wallet_password);
   end if;
 
   logger.log('END', scope, null, params);
@@ -181,7 +266,7 @@ exception
     raise;
 end set_wallet;
 
-function get_response (resp in out nocopy utl_http.resp) return clob is
+function get_response (resp in out nocopy sys.utl_http.resp) return clob is
   scope logger_logs.scope%type := scope_prefix || 'get_response';
   params logger.tab_param;
   buf varchar2(32767);
@@ -189,18 +274,18 @@ function get_response (resp in out nocopy utl_http.resp) return clob is
 begin
   logger.log('START', scope, null, params);
   
-  dbms_lob.createtemporary(ret, true);
+  sys.dbms_lob.createtemporary(ret, true);
 
   begin
     loop
-      utl_http.read_text(resp, buf, 32767);
-      dbms_lob.writeappend(ret, length(buf), buf);
+      sys.utl_http.read_text(resp, buf, 32767);
+      sys.dbms_lob.writeappend(ret, length(buf), buf);
     end loop;
   exception
-    when utl_http.end_of_body then
+    when sys.utl_http.end_of_body then
       null;
   end;
-  utl_http.end_response(resp);
+  sys.utl_http.end_response(resp);
 
   logger.log('END', scope, ret, params);
   return ret;
@@ -221,8 +306,8 @@ function get_json
   scope logger_logs.scope%type := scope_prefix || 'get_json';
   params logger.tab_param;
   url   varchar2(4000) := p_url;
-  req   utl_http.req;
-  resp  utl_http.resp;
+  req   sys.utl_http.req;
+  resp  sys.utl_http.resp;
   ret   clob;
 begin
   logger.append_param(params,'p_url',p_url);
@@ -237,26 +322,26 @@ begin
     
   set_wallet;
 
-  req := utl_http.begin_request(url => p_url, method => p_method);
+  req := sys.utl_http.begin_request(url => p_url, method => p_method);
 
   if p_user is not null or p_pwd is not null then
-    logger.log('utl_http.set_authentication', scope, null, params);
-    utl_http.set_authentication(req, p_user, p_pwd);
+    logger.log('sys.utl_http.set_authentication', scope, null, params);
+    sys.utl_http.set_authentication(req, p_user, p_pwd);
   end if;
 
   if p_data is not null then
-    logger.log('utl_http set headers Content-Type/Length', scope, null, params);
-    utl_http.set_header (req,'Content-Type','application/json');
-    utl_http.set_header (req,'Content-Length',length(p_data));
-    logger.log('utl_http.write_text', scope, null, params);
-    utl_http.write_text (req,p_data);
+    logger.log('sys.utl_http set headers Content-Type/Length', scope, null, params);
+    sys.utl_http.set_header (req,'Content-Type','application/json');
+    sys.utl_http.set_header (req,'Content-Length',length(p_data));
+    logger.log('sys.utl_http.write_text', scope, null, params);
+    sys.utl_http.write_text (req,p_data);
   end if;
   
   if p_accept is not null then
-    utl_http.set_header (req,'Accept',p_accept);
+    sys.utl_http.set_header (req,'Accept',p_accept);
   end if;
 
-  resp := utl_http.get_response(req);
+  resp := sys.utl_http.get_response(req);
   logger.log('HTTP response: ' || resp.status_code || ' ' || resp.reason_phrase, scope, null, params);
 
   log_headers(resp);
@@ -285,8 +370,10 @@ end get_epoch;
 procedure send_msg (p_payload in out nocopy t_clicksend_msg) as
   scope logger_logs.scope%type := scope_prefix || 'send_msg';
   params logger.tab_param;
-  payload varchar2(32767);
-  resp_text varchar2(32767);
+  is_prod            boolean;
+  non_prod_recipient varchar2(255);
+  recipient          varchar2(255);
+  resp_text          varchar2(32767);
   
   procedure log_response is
     -- needs to commit the log entry independently of calling transaction
@@ -350,6 +437,22 @@ begin
   
   assert(p_payload.message_type in (message_type_sms, message_type_mms, message_type_voice)
         ,'message_type must be sms, mms or voice');
+
+  prod_check
+    (p_is_prod            => is_prod
+    ,p_non_prod_recipient => non_prod_recipient
+    );
+
+  if not is_prod and non_prod_recipient is not null then
+  
+    -- replace recipient with the non-prod recipient 
+    recipient := non_prod_recipient;
+    
+  else
+  
+    recipient := p_payload.recipient;
+  
+  end if;
   
   begin
     apex_json.initialize_clob_output;
@@ -367,7 +470,7 @@ begin
           apex_json.write('subject', p_payload.subject);
         end if;
         apex_json.write('body', p_payload.message);
-        apex_json.write('to', p_payload.recipient);
+        apex_json.write('to', recipient);
         if p_payload.message_type = message_type_voice then
           apex_json.write('lang', p_payload.voice_lang);
           apex_json.write('voice', p_payload.voice_gender);
@@ -392,14 +495,24 @@ begin
       apex_json.free_output;
       raise;
   end;
+  
+  if is_prod or non_prod_recipient is not null then
 
-  resp_text := get_json
-    (p_url    => api_url || p_payload.message_type || '/send'
-    ,p_method => 'POST'
-    ,p_data   => payload
-    ,p_user   => setting(setting_clicksend_username)
-    ,p_pwd    => setting(setting_clicksend_secret_key)
-    );
+    resp_text := get_json
+      (p_url    => setting(setting_api_url) || p_payload.message_type || '/send'
+      ,p_method => 'POST'
+      ,p_data   => payload
+      ,p_user   => setting(setting_clicksend_username)
+      ,p_pwd    => setting(setting_clicksend_secret_key)
+      );
+
+  else
+  
+    logger.log_warning('message suppressed', scope, null, params);
+  
+    resp_text := 'message suppressed: ' || get_global_name;
+  
+  end if;
   
   log_response;
 
@@ -452,6 +565,8 @@ procedure init
   ,p_voice_preamble       in varchar2 := default_no_change
   ,p_log_retention_days   in number := null
   ,p_queue_expiration     in number := null
+  ,p_prod_instance_name   in varchar2 := default_no_change
+  ,p_non_prod_recipient   in varchar2 := default_no_change
   ) is
   scope logger_logs.scope%type := scope_prefix || 'init';
   params logger.tab_param;
@@ -467,7 +582,9 @@ begin
   logger.append_param(params,'p_default_voice_lang',p_default_voice_lang);
   logger.append_param(params,'p_default_voice_gender',p_default_voice_gender);
   logger.append_param(params,'p_voice_preamble',p_voice_preamble);
-  logger.append_param(params,'p_queue_expiration',p_queue_expiration);  
+  logger.append_param(params,'p_queue_expiration',p_queue_expiration); 
+  logger.append_param(params,'p_prod_instance_name',p_prod_instance_name);
+  logger.append_param(params,'p_non_prod_recipient',p_non_prod_recipient); 
   logger.log('START', scope, null, params);
   
   if nvl(p_clicksend_username,'*') != default_no_change then
@@ -518,6 +635,14 @@ begin
     set_setting(setting_queue_expiration, p_queue_expiration);
   end if;
 
+  if nvl(p_prod_instance_name,'*') != default_no_change then
+    set_setting(setting_prod_instance_name, p_prod_instance_name);
+  end if;
+
+  if nvl(p_non_prod_recipient,'*') != default_no_change then
+    set_setting(setting_non_prod_recipient, p_non_prod_recipient);
+  end if;
+
   logger.log('END', scope, null, params);
 exception
   when others then
@@ -537,8 +662,8 @@ procedure send_sms
   ) is
   scope logger_logs.scope%type := scope_prefix || 'send_sms';
   params logger.tab_param;
-  enq_opts        dbms_aq.enqueue_options_t;
-  enq_msg_props   dbms_aq.message_properties_t;
+  enq_opts        sys.dbms_aq.enqueue_options_t;
+  enq_msg_props   sys.dbms_aq.message_properties_t;
   payload         t_clicksend_msg;
   msgid           raw(16);
   sender          varchar2(100);
@@ -564,7 +689,7 @@ begin
     assert(replace(translate(p_mobile,'0123456789','-'),'-','') is null, 'mobile must be 10 digits (' || p_mobile || ') (unless it starts with a +)');
   end if;
   
-  country := nvl(p_country, setting(setting_default_country, default_country));
+  country := nvl(p_country, setting(setting_default_country));
   
   if country = 'AU' then
     assert(substr(p_mobile, 1, 2) in ('04', '05') or substr(p_mobile, 1, 4) in ('+614', '+615'), 'AU mobile must start with 04 or 05 (or +614 or +615)');
@@ -573,8 +698,8 @@ begin
   assert(p_message is not null, 'p_message cannot be null');
   assert(length(p_message) <= 960, 'maximum message length is 960 (' || length(p_message) || ')');
   
-  sender := nvl(p_sender, setting(setting_default_sender, default_null));
-  assert(sender != default_null, 'sender cannot be null');
+  sender := nvl(p_sender, setting(setting_default_sender));
+  assert(sender is not null, 'sender cannot be null');
   assert(length(sender) <= 11, 'sender cannot be >11 characters (' || sender || ')');
   
   assert(length(p_reply_email) <= 255, 'p_reply_email cannot be >255 characters');
@@ -596,10 +721,10 @@ begin
     ,custom_string => p_custom_string
     );
 
-  enq_msg_props.expiration := setting(setting_queue_expiration, default_queue_expiration);
+  enq_msg_props.expiration := setting(setting_queue_expiration);
   enq_msg_props.priority   := p_priority;
 
-  dbms_aq.enqueue
+  sys.dbms_aq.enqueue
     (queue_name         => queue_name
     ,enqueue_options    => enq_opts
     ,message_properties => enq_msg_props
@@ -630,8 +755,8 @@ procedure send_mms
   ) is
   scope logger_logs.scope%type := scope_prefix || 'send_mms';
   params logger.tab_param;
-  enq_opts        dbms_aq.enqueue_options_t;
-  enq_msg_props   dbms_aq.message_properties_t;
+  enq_opts        sys.dbms_aq.enqueue_options_t;
+  enq_msg_props   sys.dbms_aq.message_properties_t;
   payload         t_clicksend_msg;
   msgid           raw(16);
   sender          varchar2(100);
@@ -664,7 +789,7 @@ begin
     assert(replace(translate(p_mobile,'0123456789','-'),'-','') is null, 'mobile must be 10 digits (' || p_mobile || ') (unless it starts with a +)');
   end if;
   
-  country := nvl(p_country, setting(setting_default_country, default_country));
+  country := nvl(p_country, setting(setting_default_country));
   
   if country = 'AU' then
     assert(substr(p_mobile, 1, 2) in ('04', '05') or substr(p_mobile, 1, 4) in ('+614', '+615'), 'AU mobile must start with 04 or 05 (or +614 or +615)');
@@ -673,8 +798,8 @@ begin
   assert(p_message is not null, 'p_message cannot be null');
   assert(length(p_message) <= 1500, 'maximum message length is 1500 (' || length(p_message) || ')');
   
-  sender := nvl(p_sender, setting(setting_default_sender, default_null));
-  assert(sender != default_null, 'sender cannot be null');
+  sender := nvl(p_sender, setting(setting_default_sender));
+  assert(sender is not null, 'sender cannot be null');
   assert(length(sender) <= 11, 'sender cannot be >11 characters (' || sender || ')');
   
   assert(length(p_reply_email) <= 255, 'p_reply_email cannot be >255 characters');
@@ -696,10 +821,10 @@ begin
     ,custom_string => p_custom_string
     );
 
-  enq_msg_props.expiration := setting(setting_queue_expiration, default_queue_expiration);
+  enq_msg_props.expiration := setting(setting_queue_expiration);
   enq_msg_props.priority   := p_priority;
 
-  dbms_aq.enqueue
+  sys.dbms_aq.enqueue
     (queue_name         => queue_name
     ,enqueue_options    => enq_opts
     ,message_properties => enq_msg_props
@@ -728,8 +853,8 @@ procedure send_voice
   ) is
   scope logger_logs.scope%type := scope_prefix || 'send_voice';
   params logger.tab_param;
-  enq_opts        dbms_aq.enqueue_options_t;
-  enq_msg_props   dbms_aq.message_properties_t;
+  enq_opts        sys.dbms_aq.enqueue_options_t;
+  enq_msg_props   sys.dbms_aq.message_properties_t;
   payload         t_clicksend_msg;
   msgid           raw(16);
   message         varchar2(4000);
@@ -757,16 +882,16 @@ begin
     assert(replace(translate(p_phone_no,'0123456789','-'),'-','') is null, 'phone_no must be 10 digits (' || p_phone_no || ') (unless it starts with a +)');
   end if;
   
-  country := nvl(p_country, setting(setting_default_country, default_country));
+  country := nvl(p_country, setting(setting_default_country));
   
   assert(p_message is not null, 'p_message cannot be null');
-  message := substr(setting(setting_voice_preamble, default_voice_preamble) || p_message, 1, 4000);
+  message := substr(setting(setting_voice_preamble) || p_message, 1, 4000);
   assert(length(message) <= 1200, 'maximum message length is 1200 (' || length(message) || ') including preamble');
 
-  voice_lang := nvl(p_voice_lang, setting(setting_default_voice_lang, default_null));
-  assert(voice_lang != default_null, 'voice_lang cannot be null');
+  voice_lang := nvl(p_voice_lang, setting(setting_default_voice_lang));
+  assert(voice_lang is not null, 'voice_lang cannot be null');
 
-  voice_gender := nvl(p_voice_gender, setting(setting_default_voice_gender, default_voice_gender));
+  voice_gender := nvl(p_voice_gender, setting(setting_default_voice_gender));
   assert(voice_gender in ('female','male'), 'voice_gender must be female or male');
   
   assert(length(p_custom_string) <= 4000, 'p_custom_string cannot be >4000 characters');
@@ -787,10 +912,10 @@ begin
     ,custom_string => p_custom_string
     );
 
-  enq_msg_props.expiration := setting(setting_queue_expiration, default_queue_expiration);
+  enq_msg_props.expiration := setting(setting_queue_expiration);
   enq_msg_props.priority   := p_priority;
 
-  dbms_aq.enqueue
+  sys.dbms_aq.enqueue
     (queue_name         => queue_name
     ,enqueue_options    => enq_opts
     ,message_properties => enq_msg_props
@@ -816,7 +941,7 @@ begin
   logger.log('START', scope, null, params);
 
   v_json := get_json
-    (p_url    => api_url || 'account'
+    (p_url    => setting(setting_api_url) || 'account'
     ,p_method => 'GET'
     ,p_user   => setting(setting_clicksend_username)
     ,p_pwd    => setting(setting_clicksend_secret_key)
@@ -867,20 +992,20 @@ begin
   logger.append_param(params,'p_retry_delay',p_retry_delay);
   logger.log('START', scope, null, params);
 
-  dbms_aqadm.create_queue_table
+  sys.dbms_aqadm.create_queue_table
     (queue_table        => queue_table
     ,queue_payload_type => payload_type
     ,sort_list          => 'priority,enq_time'
     );
 
-  dbms_aqadm.create_queue
+  sys.dbms_aqadm.create_queue
     (queue_name  => queue_name
     ,queue_table => queue_table
     ,max_retries => p_max_retries
     ,retry_delay => p_retry_delay
     );
 
-  dbms_aqadm.start_queue (queue_name);
+  sys.dbms_aqadm.start_queue (queue_name);
 
   logger.log('END', scope, null, params);
 exception
@@ -895,11 +1020,11 @@ procedure drop_queue is
 begin
   logger.log('START', scope, null, params);
 
-  dbms_aqadm.stop_queue (queue_name);
+  sys.dbms_aqadm.stop_queue (queue_name);
   
-  dbms_aqadm.drop_queue (queue_name);
+  sys.dbms_aqadm.drop_queue (queue_name);
   
-  dbms_aqadm.drop_queue_table (queue_table);  
+  sys.dbms_aqadm.drop_queue_table (queue_table);  
 
   logger.log('END', scope, null, params);
 exception
@@ -911,12 +1036,12 @@ end drop_queue;
 procedure purge_queue (p_msg_state IN VARCHAR2 := default_purge_msg_state) is
   scope logger_logs.scope%type := scope_prefix || 'purge_queue';
   params logger.tab_param;
-  r_opt dbms_aqadm.aq$_purge_options_t;
+  r_opt sys.dbms_aqadm.aq$_purge_options_t;
 begin
   logger.append_param(params,'p_msg_state',p_msg_state);
   logger.log('START', scope, null, params);
 
-  dbms_aqadm.purge_queue_table
+  sys.dbms_aqadm.purge_queue_table
     (queue_table     => queue_table
     ,purge_condition => case when p_msg_state is not null
                         then replace(q'[ qtview.msg_state = '#STATE#' ]'
@@ -935,8 +1060,8 @@ procedure push_queue
   (p_asynchronous in boolean := false) as
   scope logger_logs.scope%type := scope_prefix || 'push_queue';
   params logger.tab_param;
-  r_dequeue_options    dbms_aq.dequeue_options_t;
-  r_message_properties dbms_aq.message_properties_t;
+  r_dequeue_options    sys.dbms_aq.dequeue_options_t;
+  r_message_properties sys.dbms_aq.message_properties_t;
   msgid                raw(16);
   payload              t_clicksend_msg;
   dequeue_count        integer := 0;
@@ -949,7 +1074,7 @@ begin
   
     -- use dbms_job so that it is only run if/when this session commits
   
-    dbms_job.submit
+    sys.dbms_job.submit
       (job  => job
       ,what => $$PLSQL_UNIT || '.push_queue;'
       );
@@ -962,13 +1087,13 @@ begin
     logger.log('commit', scope, null, params);
     commit;
     
-    r_dequeue_options.wait := dbms_aq.no_wait;
+    r_dequeue_options.wait := sys.dbms_aq.no_wait;
   
     -- loop through all messages in the queue until there is none
     -- exit this loop when the e_no_queue_data exception is raised.
     loop    
   
-      dbms_aq.dequeue
+      sys.dbms_aq.dequeue
         (queue_name         => queue_name
         ,dequeue_options    => r_dequeue_options
         ,message_properties => r_message_properties
@@ -1014,7 +1139,7 @@ begin
 
   assert(p_repeat_interval is not null, 'create_job: p_repeat_interval cannot be null');
 
-  dbms_scheduler.create_job
+  sys.dbms_scheduler.create_job
     (job_name        => job_name
     ,job_type        => 'stored_procedure'
     ,job_action      => $$PLSQL_UNIT||'.push_queue'
@@ -1022,9 +1147,9 @@ begin
     ,repeat_interval => p_repeat_interval
     );
 
-  dbms_scheduler.set_attribute(job_name,'restartable',true);
+  sys.dbms_scheduler.set_attribute(job_name,'restartable',true);
 
-  dbms_scheduler.enable(job_name);
+  sys.dbms_scheduler.enable(job_name);
 
   logger.log('END', scope, null, params);
 exception
@@ -1040,7 +1165,7 @@ begin
   logger.log('START', scope, null, params);
 
   begin
-    dbms_scheduler.stop_job (job_name);
+    sys.dbms_scheduler.stop_job (job_name);
   exception
     when others then
       if sqlcode != -27366 /*job already stopped*/ then
@@ -1048,7 +1173,7 @@ begin
       end if;
   end;
   
-  dbms_scheduler.drop_job (job_name);
+  sys.dbms_scheduler.drop_job (job_name);
 
   logger.log('END', scope, null, params);
 exception
@@ -1093,7 +1218,7 @@ begin
 
   assert(p_repeat_interval is not null, 'create_purge_job: p_repeat_interval cannot be null');
 
-  dbms_scheduler.create_job
+  sys.dbms_scheduler.create_job
     (job_name        => purge_job_name
     ,job_type        => 'stored_procedure'
     ,job_action      => $$PLSQL_UNIT||'.purge_logs'
@@ -1101,9 +1226,9 @@ begin
     ,repeat_interval => p_repeat_interval
     );
 
-  dbms_scheduler.set_attribute(job_name,'restartable',true);
+  sys.dbms_scheduler.set_attribute(job_name,'restartable',true);
 
-  dbms_scheduler.enable(purge_job_name);
+  sys.dbms_scheduler.enable(purge_job_name);
 
   logger.log('END', scope, null, params);
 exception
@@ -1119,7 +1244,7 @@ begin
   logger.log('START', scope, null, params);
 
   begin
-    dbms_scheduler.stop_job (purge_job_name);
+    sys.dbms_scheduler.stop_job (purge_job_name);
   exception
     when others then
       if sqlcode != -27366 /*job already stopped*/ then
@@ -1127,7 +1252,7 @@ begin
       end if;
   end;
   
-  dbms_scheduler.drop_job (purge_job_name);
+  sys.dbms_scheduler.drop_job (purge_job_name);
 
   logger.log('END', scope, null, params);
 exception

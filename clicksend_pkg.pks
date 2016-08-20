@@ -1,7 +1,7 @@
 create or replace package clicksend_pkg as
-/* clicksend API v0.1
-   https://github.com/jeffreykemp/clicksend-plsql-api
-   by Jeffrey Kemp
+/* Clicksend API v0.2
+  https://github.com/jeffreykemp/clicksend-plsql-api
+  by Jeffrey Kemp
 */
 
 default_no_change             constant varchar2(4000) := '*NO-CHANGE*';
@@ -13,21 +13,39 @@ default_max_retries           constant number := 10; --allow failures before giv
 default_retry_delay           constant number := 60; --wait seconds before trying this message again
 
 -- country (note: this list is not complete)
+country_afghanistan           constant varchar2(2) := 'AF';
 country_australia             constant varchar2(2) := 'AU';
+country_finland               constant varchar2(2) := 'FI';
 country_france                constant varchar2(2) := 'FR';
+country_united_arab_emirates  constant varchar2(2) := 'AE';
 country_united_kingdom        constant varchar2(2) := 'GB';
 country_usa                   constant varchar2(2) := 'US';
+country_zimbabwe              constant varchar2(2) := 'ZW';
 -- refer http://docs.clicksend.apiary.io/#reference/countries/country-collection/get-all-countries
 
--- voice language (note: this list is not complete)
+-- voice language (note: this list might be incomplete)
 voice_american                constant varchar2(10) := 'en-us'; -- male or female
 voice_australian              constant varchar2(10) := 'en-au'; -- male or female
 voice_british                 constant varchar2(10) := 'en-gb'; -- male or female
 voice_french                  constant varchar2(10) := 'fr-fr'; -- male or female
+voice_canadian_french         constant varchar2(10) := 'fr-ca'; -- female only
+voice_chinese                 constant varchar2(10) := 'zh-cn'; -- male or female
+voice_dutch                   constant varchar2(10) := 'nl-nl'; -- male or female
 voice_german                  constant varchar2(10) := 'de-de'; -- male or female
+voice_indian_english          constant varchar2(10) := 'en-in'; -- female only
+voice_icelandic               constant varchar2(10) := 'is-is'; -- male or female
 voice_italian                 constant varchar2(10) := 'it-it'; -- male or female
 voice_japanese                constant varchar2(10) := 'ja-jp'; -- male or female
+voice_korean                  constant varchar2(10) := 'ko-kr'; -- male or female
+voice_mexican                 constant varchar2(10) := 'es-mx'; -- female only
+voice_polish                  constant varchar2(10) := 'pl-pl'; -- male or female
+voice_portuguese              constant varchar2(10) := 'pt-br'; -- male or female
+voice_romanian                constant varchar2(10) := 'ro-ro'; -- female only
+voice_russian                 constant varchar2(10) := 'ru-ru'; -- female only
 voice_spanish                 constant varchar2(10) := 'es-es'; -- male or female
+voice_spanish_us              constant varchar2(10) := 'es-us'; -- male or female
+voice_swedish                 constant varchar2(10) := 'sv-se'; -- female only
+voice_turkish                 constant varchar2(10) := 'tr-tr'; -- female only
 -- refer http://docs.clicksend.apiary.io/#reference/voice/voice-languages/voice-languages
 
 -- voice gender
@@ -49,6 +67,8 @@ procedure init
   ,p_voice_preamble       in varchar2 := default_no_change
   ,p_log_retention_days   in number := null
   ,p_queue_expiration     in number := null
+  ,p_prod_instance_name   in varchar2 := default_no_change
+  ,p_non_prod_recipient   in varchar2 := default_no_change
   );
 
 procedure send_sms
