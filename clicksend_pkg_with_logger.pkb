@@ -137,6 +137,21 @@ exception
     raise;
 end load_settings;
 
+procedure reset is
+  scope logger_logs.scope%type := scope_prefix || 'setting';
+  params logger.tab_param;
+begin
+  logger.log('START', scope, null, params);
+
+  g_setting.delete;
+
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
+end reset;
+
 -- get a setting
 -- if p_default is set, a null/not found will return the default value
 -- if p_default is null, a not found will raise an exception
@@ -158,16 +173,11 @@ begin
   p_value := g_setting(p_name);
 
   logger.log('END', scope, null, params);
-  return nvl(p_value, p_default);
+  return p_value;
 exception
   when no_data_found then
-    if p_default is not null then
-      logger.log('END default', scope, null, params);
-      return p_default;
-    else
-      logger.log_error('No Data Found', scope, null, params);
-      raise_application_error(-20000, 'clicksend setting not set "' || p_name || '" - please setup using ' || $$plsql_unit || '.init()');
-    end if;
+    logger.log_error('No Data Found', scope, null, params);
+    raise_application_error(-20000, 'clicksend setting not set "' || p_name || '" - please setup using ' || $$plsql_unit || '.init()');
   when others then
     logger.log_error('Unhandled Exception', scope, null, params);
     raise;
@@ -185,7 +195,7 @@ function get_global_name return varchar2 result_cache is
 begin
   logger.log('START', scope, null, params);
 
-  select g.global_name into gn from global_name g;
+  select g.global_name into gn from sys.global_name g;
 
   logger.log('END gn=' || gn, scope, null, params);
   return gn;
@@ -373,6 +383,7 @@ procedure send_msg (p_payload in out nocopy t_clicksend_msg) as
   is_prod            boolean;
   non_prod_recipient varchar2(255);
   recipient          varchar2(255);
+  payload            varchar2(32767);
   resp_text          varchar2(32767);
   
   procedure log_response is
@@ -407,8 +418,8 @@ procedure send_msg (p_payload in out nocopy t_clicksend_msg) as
       log.clicksend_cost      := apex_json.get_number('data.total_price');
     exception
       when others then
-        -- log the error but don't stop the logging
-        logger.log_error(SQLERRM, scope, resp_text, params);
+        -- log the parse problem but don't stop the logging
+        logger.log_warning(SQLERRM, scope, resp_text, params);
     end;
 
     insert into clicksend_msg_log values log;
@@ -679,6 +690,8 @@ begin
   logger.append_param(params,'p_priority',p_priority);
   logger.log('START', scope, null, params);
   
+  reset;
+  
   assert(p_mobile is not null, 'p_mobile cannot be null');
   
   if substr(p_mobile, 1, 1) = '+' then
@@ -773,6 +786,8 @@ begin
   logger.append_param(params,'p_custom_string',p_custom_string);
   logger.append_param(params,'p_priority',p_priority);
   logger.log('START', scope, null, params);
+  
+  reset;
   
   assert(p_mobile is not null, 'p_mobile cannot be null');
 
@@ -871,6 +886,8 @@ begin
   logger.append_param(params,'p_custom_string',p_custom_string);
   logger.append_param(params,'p_priority',p_priority);
   logger.log('START', scope, null, params);
+
+  reset;
   
   assert(p_phone_no is not null, 'p_phone_no cannot be null');
   
@@ -939,6 +956,8 @@ pragma autonomous_transaction;
   v_json  varchar2(32767);
 begin
   logger.log('START', scope, null, params);
+
+  reset;
 
   v_json := get_json
     (p_url    => setting(setting_api_url) || 'account'
@@ -1082,6 +1101,8 @@ begin
     logger.log('submitted job=' || job, scope, null, params);
       
   else
+
+    reset;
     
     -- commit any messages requested in the current session
     logger.log('commit', scope, null, params);
@@ -1190,6 +1211,8 @@ begin
   logger.append_param(params,'p_log_retention_days',p_log_retention_days);
   logger.log('START', scope, null, params);
 
+  reset;
+
   l_log_retention_days := nvl(p_log_retention_days, log_retention_days);
   logger.append_param(params,'l_log_retention_days',l_log_retention_days);
   
@@ -1260,6 +1283,81 @@ exception
     logger.log_error('Unhandled Exception', scope, null, params);
     raise;
 end drop_purge_job;
+
+procedure send_test_sms
+  (p_mobile               in varchar2
+  ,p_message              in varchar2 := null
+  ,p_sender               in varchar2 := null
+  ,p_clicksend_username   in varchar2 := default_no_change
+  ,p_clicksend_secret_key in varchar2 := default_no_change
+  ,p_api_url              in varchar2 := default_no_change
+  ,p_wallet_path          in varchar2 := default_no_change
+  ,p_wallet_password      in varchar2 := default_no_change
+  ) is
+  scope logger_logs.scope%type := scope_prefix || 'send_test_sms';
+  params logger.tab_param;
+  payload t_clicksend_msg;
+begin
+  logger.append_param(params,'p_mobile',p_mobile);
+  logger.append_param(params,'p_message',p_message);
+  logger.append_param(params,'p_sender',p_sender);
+  logger.append_param(params,'p_clicksend_username',p_clicksend_username);
+  logger.append_param(params,'p_clicksend_secret_key',case when p_clicksend_secret_key is null then 'null' else 'not null' end);
+  logger.append_param(params,'p_api_url',p_api_url);
+  logger.append_param(params,'p_wallet_path',p_wallet_path);
+  logger.append_param(params,'p_wallet_password',case when p_wallet_password is null then 'null' else 'not null' end);
+  logger.log('START', scope, null, params);
+  
+  -- set up settings just for this call  
+  load_settings;
+  if p_clicksend_username != default_no_change then
+    g_setting(setting_clicksend_username) := p_clicksend_username;
+  end if;
+  if p_clicksend_secret_key != default_no_change then
+    g_setting(setting_clicksend_secret_key) := p_clicksend_secret_key;
+  end if;
+  if p_api_url != default_no_change then
+    g_setting(setting_api_url) := p_api_url;
+  end if;
+  if p_wallet_path != default_no_change then
+    g_setting(setting_wallet_path) := p_wallet_path;
+  end if;
+  if p_wallet_password != default_no_change then
+    g_setting(setting_wallet_password) := p_wallet_password;
+  end if;
+
+  payload := t_clicksend_msg
+    (message_type  => message_type_sms
+    ,requested_ts  => systimestamp
+    ,schedule_dt   => null
+    ,sender        => nvl(p_sender, setting(setting_default_sender))
+    ,recipient     => local_to_intnl_au(p_mobile, setting(setting_default_country))
+    ,subject       => ''
+    ,message       => nvl(p_message
+                         ,'This test message was sent from '
+                          || get_global_name
+                          || ' at '
+                          || to_char(systimestamp,'DD/MM/YYYY HH24:MI:SS.FF'))
+    ,media_file    => ''
+    ,voice_lang    => ''
+    ,voice_gender  => ''
+    ,country       => setting(setting_default_country)
+    ,reply_email   => ''
+    ,custom_string => ''
+    );
+
+  send_msg(p_payload => payload);
+    
+  -- reset everything back to normal  
+  reset;
+  
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    reset;
+    raise;
+end send_test_sms;
 
 end clicksend_pkg;
 /

@@ -143,6 +143,20 @@ procedure create_purge_job
 -- drop the purge_logs job
 procedure drop_purge_job;
 
+-- Send a test sms.
+-- Can be used to test a setting without storing it.
+-- Bypasses the queue.
+procedure send_test_sms
+  (p_mobile               in varchar2
+  ,p_message              in varchar2 := null
+  ,p_sender               in varchar2 := null
+  ,p_clicksend_username   in varchar2 := default_no_change
+  ,p_clicksend_secret_key in varchar2 := default_no_change
+  ,p_api_url              in varchar2 := default_no_change
+  ,p_wallet_path          in varchar2 := default_no_change
+  ,p_wallet_password      in varchar2 := default_no_change
+  );
+
 end clicksend_pkg;
 /
 
