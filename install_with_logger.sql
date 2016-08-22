@@ -1,5 +1,5 @@
 prompt install.sql
-prompt clicksend v0.1
+prompt clicksend v0.2
 -- run this script in the schema in which you wish the objects to be installed.
 
 @create_tables.sql
@@ -20,6 +20,19 @@ begin clicksend_pkg.create_purge_job; end;
 
 prompt attempt to recompile any invalid objects
 begin dbms_utility.compile_schema(user,false); end;
+/
+
+prompt update api_version
+merge into clicksend_settings t
+using (select 'api_version' as nm, '0.2' as val from dual) s
+on (t.setting_name = s.nm)
+when matched then update set setting_value = s.val
+when not matched then insert (setting_name, setting_value)
+values (s.nm, s.val);
+
+commit;
+
+begin logger.log_permanent('Clicksend PL/SQL API installed v0.2', 'clicksend'); end;
 /
 
 set feedback off heading off
