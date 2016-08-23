@@ -1,6 +1,6 @@
 {
   "name": "Oracle PL/SQL API for Clicksend",
   "tagline": "Send transactional messages from your Oracle database to anyone with a phone",
-  "body": "# clicksend-plsql-api - Oracle PL/SQL API for [Clicksend](https://www.clicksend.com) #\r\n\r\n* **SMS** (Short Message Service)\r\n\r\n* **MMS** (Multimedia Message Service)\r\n\r\n* Text to **Voice**\r\n \r\nFor installation instructions, detailed API references and example code, refer to the **[WIKI](https://github.com/jeffreykemp/clicksend-plsql-api/wiki)**.\r\n\r\nRelated blog post: https://jeffkemponoracle.com/2016/08/17/send-sms-mms-and-voice-messages-from-oracle-plsql/\r\n",
+  "body": "The API provides methods to use your [Clicksend](https://www.clicksend.com) account to send messages via:\r\n\r\n* **SMS** (Short Message Service)\r\n\r\n* **MMS** (Multimedia Message Service)\r\n\r\n* Text to **Voice**\r\n \r\nFor installation instructions, detailed API references and example code, refer to the **[WIKI](https://github.com/jeffreykemp/clicksend-plsql-api/wiki)**.\r\n\r\nRelated blog post: https://jeffkemponoracle.com/2016/08/17/send-sms-mms-and-voice-messages-from-oracle-plsql/\r\n",
   "note": "Don't delete this file! It's used internally to help with page regeneration."
 }
