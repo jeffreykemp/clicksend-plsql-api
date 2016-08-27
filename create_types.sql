@@ -35,3 +35,27 @@ create type t_clicksend_country is object
 /
 
 create type t_clicksend_country_arr is table of t_clicksend_country;
+
+create type t_clicksend_sms_history is object
+  (event_dt      date
+  ,mobile        varchar2(20)
+  ,message       varchar2(4000)
+  ,status        varchar2(100)
+  ,sender        varchar2(100)
+  ,schedule_dt   date
+  ,status_code   varchar2(100)
+  ,status_text   varchar2(4000)
+  ,error_code    varchar2(100)
+  ,error_text    varchar2(4000)
+  ,message_id    varchar2(4000)
+  ,message_parts number
+  ,message_price number
+  ,reply_email   varchar2(255)
+  ,custom_string varchar2(4000)
+  ,subaccount_id number
+  ,country       varchar2(10)
+  ,carrier       varchar2(100)
+  );
+/
+
+create type t_clicksend_sms_history_arr is table of t_clicksend_sms_history;

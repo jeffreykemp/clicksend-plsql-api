@@ -64,6 +64,14 @@ select * from table(clicksend_pkg1.get_languages);
 
 select * from table(clicksend_pkg1.get_countries);
 
+select * from table(clicksend_pkg1.get_sms_history(sysdate-100,sysdate));
+
+select * from clicksend_msg_log where clicksend_messageid = 'A0589BBC-1472-4977-B7F3-61AEBBF9B64D';
+
+'20/05/2016 07:31:03.000000000 AM'
+
+select systimestamp-sys_extract_utc(systimestamp) from dual;
+
 exec clicksend_pkg.drop_job;
 
 exec clicksend_pkg.drop_purge_job;

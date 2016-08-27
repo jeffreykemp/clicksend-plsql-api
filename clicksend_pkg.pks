@@ -1,4 +1,4 @@
-create or replace package clicksend_pkg as
+create or replace package clicksend_pkg1 as
 /* Clicksend API v0.2
   https://github.com/jeffreykemp/clicksend-plsql-api
   by Jeffrey Kemp
@@ -114,6 +114,11 @@ function get_languages return t_clicksend_lang_arr pipelined;
 
 function get_countries return t_clicksend_country_arr pipelined;
 
+function get_sms_history
+  (p_from  in date := null -- default is 7 days ago
+  ,p_until in date := null -- default is sysdate
+  ) return t_clicksend_sms_history_arr pipelined;
+
 -- create the queue for asynchronous sms's
 procedure create_queue
   (p_max_retries in number := default_max_retries
@@ -161,7 +166,7 @@ procedure send_test_sms
   ,p_wallet_password      in varchar2 := default_no_change
   );
 
-end clicksend_pkg;
+end clicksend_pkg1;
 /
 
 show errors

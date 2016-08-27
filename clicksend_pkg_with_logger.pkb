@@ -1,4 +1,4 @@
-create or replace package body clicksend_pkg as
+create or replace package body clicksend_pkg1 as
 /* Clicksend API v0.2
   https://github.com/jeffreykemp/clicksend-plsql-api
   by Jeffrey Kemp
@@ -308,6 +308,7 @@ end get_response;
 function get_json
   (p_url    in varchar2
   ,p_method in varchar2
+  ,p_params in varchar2 := null
   ,p_data   in varchar2 := null
   ,p_user   in varchar2 := null
   ,p_pwd    in varchar2 := null
@@ -331,8 +332,12 @@ begin
   assert(p_url is not null, 'get_json: p_url cannot be null');
     
   set_wallet;
+  
+  if p_params is not null then
+    url := url || '?' || p_params;
+  end if;
 
-  req := sys.utl_http.begin_request(url => p_url, method => p_method);
+  req := sys.utl_http.begin_request(url => url, method => p_method);
 
   if p_user is not null or p_pwd is not null then
     logger.log('sys.utl_http.set_authentication', scope, null, params);
@@ -376,6 +381,56 @@ begin
   date_utc := sys_extract_utc(cast(p_date as timestamp));
   return trunc((date_utc - date'1970-01-01') * 24 * 60 * 60);
 end get_epoch;
+
+function epoch_to_dt (p_epoch in number) return date as
+begin
+  return date'1970-01-01' + (p_epoch / 24 / 60 / 60)
+    + (systimestamp-sys_extract_utc(systimestamp));
+end epoch_to_dt;
+
+procedure url_param (buf in out varchar2, attr in varchar2, val in varchar2) is
+  scope  logger_logs.scope%type := scope_prefix || 'url_param(1)';
+  params logger.tab_param;
+begin
+  logger.append_param(params,'attr',attr);
+  logger.append_param(params,'val',val);
+  logger.log('START', scope, null, params);
+
+  if val is not null then
+    if buf is not null then
+      buf := buf || '&';
+    end if;
+    buf := buf || attr || '=' || apex_util.url_encode(val);
+  end if;
+
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
+end url_param;
+
+procedure url_param (buf in out varchar2, attr in varchar2, dt in date) is
+  scope  logger_logs.scope%type := scope_prefix || 'url_param(2)';
+  params logger.tab_param;
+begin
+  logger.append_param(params,'attr',attr);
+  logger.append_param(params,'dt',dt);
+  logger.log('START', scope, null, params);
+
+  if dt is not null then
+    if buf is not null then
+      buf := buf || '&';
+    end if;
+    buf := buf || attr || '=' || get_epoch(dt);
+  end if;
+
+  logger.log('END', scope, null, params);
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
+end url_param;
 
 procedure send_msg (p_payload in out nocopy t_clicksend_msg) as
   scope logger_logs.scope%type := scope_prefix || 'send_msg';
@@ -1138,6 +1193,97 @@ exception
     raise;
 end get_countries;
 
+function get_sms_history
+  (p_from  in date := null -- default is 7 days prior to p_until
+  ,p_until in date := null -- default is sysdate
+  ) return t_clicksend_sms_history_arr pipelined is
+  scope logger_logs.scope%type := scope_prefix || 'get_sms_history';
+  params logger.tab_param;
+  prm varchar2(4000);
+  url varchar2(4000);
+  v_json varchar2(32767);
+  data_count number;
+  page_count number := 1;
+begin
+  logger.append_param(params,'p_from',p_from);
+  logger.append_param(params,'p_until',p_until);
+  logger.log('START', scope, null, params);
+  
+  url_param(prm, 'date_from', nvl(p_from, nvl(p_until, sysdate) - 7));
+  url_param(prm, 'date_to', nvl(p_until, sysdate));
+
+  v_json := get_json
+    (p_url    => setting(setting_api_url) || 'sms/history'
+    ,p_method => 'GET'
+    ,p_params => prm
+    ,p_user   => setting(setting_clicksend_username)
+    ,p_pwd    => setting(setting_clicksend_secret_key)
+    ,p_accept => 'application/json'
+    );
+  
+  loop
+    
+    apex_json.parse(v_json);
+    
+    data_count := apex_json.get_count('data.data');
+    logger.log('total=' || apex_json.get_number('data.total'), scope, null, params);
+    logger.log('current_page=' || apex_json.get_number('data.current_page'), scope, null, params);
+    
+    if data_count > 0 then
+      for i in 1..data_count loop
+        logger.log(i||' '||json_members_csv('data.data[%d]', i, p_values => true), scope, null, params);
+  
+        pipe row (t_clicksend_sms_history
+          (event_dt      => epoch_to_dt(apex_json.get_varchar2('data.data[%d].date', i))
+          ,mobile        => substr(apex_json.get_varchar2('data.data[%d].to', i), 1, 20)
+          ,message       => substr(apex_json.get_varchar2('data.data[%d].body', i), 1, 4000)
+          ,status        => substr(apex_json.get_varchar2('data.data[%d].status', i), 1, 100)
+          ,sender        => substr(apex_json.get_varchar2('data.data[%d].from', i), 1, 100)
+          ,schedule_dt   => epoch_to_dt(apex_json.get_varchar2('data.data[%d].schedule', i))
+          ,status_code   => substr(apex_json.get_varchar2('data.data[%d].status_code', i), 1, 100)
+          ,status_text   => substr(apex_json.get_varchar2('data.data[%d].status_text', i), 1, 4000)
+          ,error_code    => substr(apex_json.get_varchar2('data.data[%d].error_code', i), 1, 100)
+          ,error_text    => substr(apex_json.get_varchar2('data.data[%d].error_text', i), 1, 4000)
+          ,message_id    => substr(apex_json.get_varchar2('data.data[%d].message_id', i), 1, 4000)
+          ,message_parts => to_number(apex_json.get_varchar2('data.data[%d].message_parts', i))
+          ,message_price => to_number(apex_json.get_varchar2('data.data[%d].message_price', i))
+          ,reply_email   => substr(apex_json.get_varchar2('data.data[%d].from_email', i), 1, 255)
+          ,custom_string => substr(apex_json.get_varchar2('data.data[%d].custom_string', i), 1, 4000)
+          ,subaccount_id => apex_json.get_number('data.data[%d].subaccount_id', i)
+          ,country       => substr(apex_json.get_varchar2('data.data[%d].country', i), 1, 10)
+          ,carrier       => substr(apex_json.get_varchar2('data.data[%d].carrier', i), 1, 100)
+          ));
+  
+      end loop;
+    end if;
+    
+    url := apex_json.get_varchar2('data.next_page_url');
+    logger.log('url='||url, scope, null, params);
+    
+    exit when url is null;
+
+    v_json := get_json
+      (p_url    => /*setting(setting_api_url)*/'http://api.jk64.com/clicksend' || url
+      ,p_method => 'GET'
+      ,p_user   => setting(setting_clicksend_username)
+      ,p_pwd    => setting(setting_clicksend_secret_key)
+      ,p_accept => 'application/json'
+      );
+    
+    page_count := page_count + 1;
+    
+    exit when page_count > 10;
+    
+  end loop;
+
+  logger.log('END', scope);
+  return;
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
+end get_sms_history;
+
 procedure create_queue
   (p_max_retries in number := default_max_retries
   ,p_retry_delay in number := default_retry_delay
@@ -1497,7 +1643,7 @@ exception
     raise;
 end send_test_sms;
 
-end clicksend_pkg;
+end clicksend_pkg1;
 /
 
 show errors
