@@ -110,6 +110,10 @@ function get_account_details return varchar2;
 
 function get_credit_balance return number;
 
+function get_languages return t_clicksend_lang_arr pipelined;
+
+function get_countries return t_clicksend_country_arr pipelined;
+
 -- create the queue for asynchronous sms's
 procedure create_queue
   (p_max_retries in number := default_max_retries

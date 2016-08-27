@@ -60,6 +60,10 @@ select clicksend_pkg.get_account_details from dual;
 
 select clicksend_pkg.get_credit_balance from dual;
 
+select * from table(clicksend_pkg1.get_languages);
+
+select * from table(clicksend_pkg1.get_countries);
+
 exec clicksend_pkg.drop_job;
 
 exec clicksend_pkg.drop_purge_job;

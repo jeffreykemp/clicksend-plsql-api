@@ -559,6 +559,46 @@ exception
     raise;
 end local_to_intnl_au;
 
+-- comma-delimited list of attributes, plus values if required
+function json_members_csv
+  (p_path   in varchar2
+  ,p0       in varchar2
+  ,p_values in boolean
+  ) return varchar2 is
+  scope  logger_logs.scope%type := scope_prefix || 'json_members_csv';
+  params logger.tab_param;
+  arr wwv_flow_t_varchar2;
+  buf varchar2(32767);
+begin
+  logger.append_param(params,'p_path',p_path);
+  logger.append_param(params,'p0',p0);
+  logger.append_param(params,'p_values',p_values);
+  logger.log('START', scope, null, params);
+
+  arr := apex_json.get_members(p_path, p0);
+  if arr.count > 0 then
+    for i in 1..arr.count loop
+      if buf is not null then
+        buf := buf || ',';
+      end if;
+      buf := buf || arr(i);
+      if p_values then
+        buf := buf || '=' || apex_json.get_varchar2(p_path || '.' || arr(i), p0);
+      end if;
+    end loop;
+  end if;
+
+  logger.log('END', scope, null, params);
+  return buf;
+exception
+  when value_error /*not an array or object*/ then
+    logger.log('END value_error', scope, null, params);
+    return null;
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
+end json_members_csv;
+
 --------------------------------------------------------------------------------
 --------------------------------- PUBLIC METHODS ------------------------------
 --------------------------------------------------------------------------------
@@ -607,7 +647,9 @@ begin
   end if;
 
   if nvl(p_api_url,'*') != default_no_change then
-    set_setting(setting_api_url, p_api_url);
+    -- make sure the url ends with a /
+    set_setting(setting_api_url, p_api_url
+      || case when substr(p_api_url,-1,1) != '/' then '/' end);
   end if;
 
   if nvl(p_wallet_path,'*') != default_no_change then
@@ -999,6 +1041,102 @@ exception
     logger.log_error('Unhandled Exception', scope, null, params);
     raise;
 end get_credit_balance;
+
+function get_languages return t_clicksend_lang_arr pipelined is
+  scope logger_logs.scope%type := scope_prefix || 'get_languages';
+  params logger.tab_param;
+  v_json varchar2(32767);
+  data_count number;
+  gender apex_json.t_value;
+  gender1 varchar2(10);
+  gender2 varchar2(10);
+begin
+  logger.log('START', scope, null, params);
+
+  v_json := get_json
+    (p_url    => setting(setting_api_url) || 'voice/lang'
+    ,p_method => 'GET'
+    ,p_user   => setting(setting_clicksend_username)
+    ,p_pwd    => setting(setting_clicksend_secret_key)
+    ,p_accept => 'application/json'
+    );
+  
+  apex_json.parse(v_json);
+  
+  data_count := apex_json.get_count('data');
+  
+  if data_count > 0 then
+    for i in 1..data_count loop
+      logger.log(i||' '||json_members_csv('data[%d]', i, p_values => true), scope, null, params);
+
+      gender1 := null;
+      gender2 := null;
+      gender := apex_json.get_value('data[%d].gender', i);
+
+      -- perversely, the gender node might be a simple value (e.g. "gender":"female")
+      -- or it might be an array (e.g. "gender":["female","male"])
+      if gender.kind = apex_json.c_varchar2 then
+        gender1 := gender.varchar2_value;
+      elsif gender.kind = apex_json.c_array then
+        gender1 := apex_json.get_varchar2('data[%d].gender[1]', i);
+        gender2 := apex_json.get_varchar2('data[%d].gender[2]', i);
+      end if;
+
+      pipe row (t_clicksend_lang
+        (lang_code    => substr(apex_json.get_varchar2('data[%d].code', i), 1, 10)
+        ,country_desc => substr(apex_json.get_varchar2('data[%d].country', i), 1, 100)
+        ,female       => case when voice_female in (gender1,gender2) then 'Y' end
+        ,male         => case when voice_male in (gender1,gender2) then 'Y' end
+        ));
+
+    end loop;
+  end if;
+
+  logger.log('END', scope);
+  return;
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
+end get_languages;
+
+function get_countries return t_clicksend_country_arr pipelined is
+  scope logger_logs.scope%type := scope_prefix || 'get_countries';
+  params logger.tab_param;
+  v_json varchar2(32767);
+  data_count number;
+begin
+  logger.log('START', scope, null, params);
+
+  v_json := get_json
+    (p_url    => setting(setting_api_url) || 'countries'
+    ,p_method => 'GET'
+    ,p_accept => 'application/json'
+    );
+  
+  apex_json.parse(v_json);
+  
+  data_count := apex_json.get_count('data');
+  
+  if data_count > 0 then
+    for i in 1..data_count loop
+      logger.log(i||' '||json_members_csv('data[%d]', i, p_values => true), scope, null, params);
+
+      pipe row (t_clicksend_country
+        (country_code => substr(apex_json.get_varchar2('data[%d].code', i), 1, 10)
+        ,country_name => substr(apex_json.get_varchar2('data[%d].value', i), 1, 100)
+        ));
+
+    end loop;
+  end if;
+
+  logger.log('END', scope);
+  return;
+exception
+  when others then
+    logger.log_error('Unhandled Exception', scope, null, params);
+    raise;
+end get_countries;
 
 procedure create_queue
   (p_max_retries in number := default_max_retries

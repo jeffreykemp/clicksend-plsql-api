@@ -30,6 +30,14 @@ begin execute immediate 'drop table clicksend_settings'; exception when others t
 prompt drop types
 begin execute immediate 'drop type t_clicksend_msg'; exception when others then if sqlcode!=-4043 then raise; end if; end;
 /
+begin execute immediate 'drop type t_clicksend_lang_arr'; exception when others then if sqlcode!=-4043 then raise; end if; end;
+/
+begin execute immediate 'drop type t_clicksend_lang'; exception when others then if sqlcode!=-4043 then raise; end if; end;
+/
+begin execute immediate 'drop type t_clicksend_country_arr'; exception when others then if sqlcode!=-4043 then raise; end if; end;
+/
+begin execute immediate 'drop type t_clicksend_country'; exception when others then if sqlcode!=-4043 then raise; end if; end;
+/
 
 prompt drop package
 begin execute immediate 'drop package clicksend_pkg'; exception when others then if sqlcode!=-4043 then raise; end if; end;

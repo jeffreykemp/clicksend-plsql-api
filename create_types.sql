@@ -1,7 +1,5 @@
 prompt create_types.sql
--- types used by clicksend 0.1
-
-drop type t_clicksend_msg;
+-- types used by clicksend 0.2
 
 create type t_clicksend_msg is object
   ( message_type  varchar2(20) -- sms, mms, voice
@@ -19,3 +17,21 @@ create type t_clicksend_msg is object
   , custom_string varchar2(4000)
   );
 /
+
+create type t_clicksend_lang is object
+  (lang_code    varchar2(10)
+  ,country_desc varchar2(100)
+  ,female       varchar2(1)
+  ,male         varchar2(1)
+  );
+/
+
+create type t_clicksend_lang_arr is table of t_clicksend_lang;
+
+create type t_clicksend_country is object
+  (country_code varchar2(10)
+  ,country_name varchar2(100)
+  );
+/
+
+create type t_clicksend_country_arr is table of t_clicksend_country;
