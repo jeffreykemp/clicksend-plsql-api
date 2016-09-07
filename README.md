@@ -2,8 +2,6 @@
 
 ## Oracle PL/SQL API for Clicksend ##
 
-**Home page: <https://jeffreykemp.github.io/clicksend-plsql-api/>**
-
 Send transactional messages from your Oracle database to anyone with a phone, via **[Clicksend](https://www.clicksend.com)**.
 
 * **SMS** (Short Message Service)
@@ -14,6 +12,10 @@ Send transactional messages from your Oracle database to anyone with a phone, vi
  
 > *Warning: use the [Latest Release](https://github.com/jeffreykemp/clicksend-plsql-api/releases/latest) - don't use the "Download Zip" option on the home page (may contain unfinished work).*
 
-For installation instructions, detailed API references and example code, refer to the **[WIKI](https://github.com/jeffreykemp/clicksend-plsql-api/wiki)**.
+## LINKS ##
 
-Related blog post: https://jeffkemponoracle.com/2016/08/17/send-sms-mms-and-voice-messages-from-oracle-plsql/
+* **[Home page](https://jeffreykemp.github.io/clicksend-plsql-api/)**
+
+* Installation instructions, detailed API references and example code: **[WIKI](https://github.com/jeffreykemp/clicksend-plsql-api/wiki)**
+
+* Related blog post: <https://jeffkemponoracle.com/2016/08/17/send-sms-mms-and-voice-messages-from-oracle-plsql/>
