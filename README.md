@@ -10,8 +10,6 @@ Send transactional messages from your Oracle database to anyone with a phone, vi
 
 * Text to **Voice**
  
-> *Warning: use the [Latest Release](https://github.com/jeffreykemp/clicksend-plsql-api/releases/latest) - don't use the "Download Zip" option on the home page (may contain unfinished work).*
-
 ## LINKS ##
 
 * **[Home page](https://jeffreykemp.github.io/clicksend-plsql-api/)**
