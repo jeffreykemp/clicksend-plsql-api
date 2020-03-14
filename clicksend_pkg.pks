@@ -1,4 +1,4 @@
-create or replace package clicksend_pkg1 as
+create or replace package clicksend_pkg as
 /* Clicksend API v0.2
   https://github.com/jeffreykemp/clicksend-plsql-api
   by Jeffrey Kemp
@@ -166,7 +166,7 @@ procedure send_test_sms
   ,p_wallet_password      in varchar2 := default_no_change
   );
 
-end clicksend_pkg1;
+end clicksend_pkg;
 /
 
 show errors

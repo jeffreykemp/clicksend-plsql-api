@@ -1,4 +1,4 @@
-create or replace package body clicksend_pkg1 as
+create or replace package body clicksend_pkg as
 /* Clicksend API v0.2
   https://github.com/jeffreykemp/clicksend-plsql-api
   by Jeffrey Kemp
@@ -58,7 +58,7 @@ pragma exception_init (e_no_queue_data, -25228);
 procedure assert (cond in boolean, err in varchar2) is
 begin
   if not cond then
-    raise_application_error(-20000, $$PLSQL_UNIT || ' assertion failed: ' || err);
+    raise_application_error(-20000, $$plsql_unit || ' assertion failed: ' || err);
   end if;
 end assert;
 
@@ -188,23 +188,6 @@ begin
   return to_number(setting(setting_log_retention_days));
 end log_retention_days;
 
-function get_global_name return varchar2 result_cache is
-  scope  logger_logs.scope%type := scope_prefix || 'get_global_name';
-  params logger.tab_param;
-  gn global_name.global_name%type;
-begin
-  logger.log('START', scope, null, params);
-
-  select g.global_name into gn from sys.global_name g;
-
-  logger.log('END gn=' || gn, scope, null, params);
-  return gn;
-exception
-  when others then
-    logger.log_error('Unhandled Exception', scope, null, params);
-    raise;
-end get_global_name;
-
 procedure prod_check
   (p_is_prod            out boolean
   ,p_non_prod_recipient out varchar2
@@ -218,7 +201,7 @@ begin
   prod_instance_name := setting(setting_prod_instance_name);
   
   if prod_instance_name is not null then  
-    p_is_prod := prod_instance_name = get_global_name;
+    p_is_prod := (prod_instance_name = sys_context('userenv','db_name'));
   else
     p_is_prod := true; -- if setting not set, we treat this as a prod env
   end if;
@@ -576,7 +559,7 @@ begin
   
     logger.log_warning('message suppressed', scope, null, params);
   
-    resp_text := 'message suppressed: ' || get_global_name;
+    resp_text := 'message suppressed: ' || sys_context('userenv','db_name');
   
   end if;
   
@@ -1261,9 +1244,9 @@ begin
     logger.log('url='||url, scope, null, params);
     
     exit when url is null;
-
+    
     v_json := get_json
-      (p_url    => /*setting(setting_api_url)*/'http://api.jk64.com/clicksend' || url
+      (p_url    => setting(setting_api_url) || 'sms/history' || url
       ,p_method => 'GET'
       ,p_user   => setting(setting_clicksend_username)
       ,p_pwd    => setting(setting_clicksend_secret_key)
@@ -1379,7 +1362,7 @@ begin
   
     sys.dbms_job.submit
       (job  => job
-      ,what => $$PLSQL_UNIT || '.push_queue;'
+      ,what => $$plsql_unit || '.push_queue;'
       );
       
     logger.log('submitted job=' || job, scope, null, params);
@@ -1447,7 +1430,7 @@ begin
   sys.dbms_scheduler.create_job
     (job_name        => job_name
     ,job_type        => 'stored_procedure'
-    ,job_action      => $$PLSQL_UNIT||'.push_queue'
+    ,job_action      => $$plsql_unit||'.push_queue'
     ,start_date      => systimestamp
     ,repeat_interval => p_repeat_interval
     );
@@ -1528,7 +1511,7 @@ begin
   sys.dbms_scheduler.create_job
     (job_name        => purge_job_name
     ,job_type        => 'stored_procedure'
-    ,job_action      => $$PLSQL_UNIT||'.purge_logs'
+    ,job_action      => $$plsql_unit||'.purge_logs'
     ,start_date      => systimestamp
     ,repeat_interval => p_repeat_interval
     );
@@ -1619,7 +1602,7 @@ begin
     ,subject       => ''
     ,message       => nvl(p_message
                          ,'This test message was sent from '
-                          || get_global_name
+                          || sys_context('userenv','db_name')
                           || ' at '
                           || to_char(systimestamp,'DD/MM/YYYY HH24:MI:SS.FF'))
     ,media_file    => ''
@@ -1643,7 +1626,7 @@ exception
     raise;
 end send_test_sms;
 
-end clicksend_pkg1;
+end clicksend_pkg;
 /
 
 show errors

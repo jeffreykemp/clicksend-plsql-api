@@ -1,3 +1,8 @@
+-- WARNING: this is just a bunch of examples without explanation and not necessarily useful to you...
+
+-- For proper documentation and examples refer to the WIKI:
+-- https://github.com/jeffreykemp/clicksend-plsql-api/wiki
+
 begin
   clicksend_pkg.init
     (p_clicksend_username   => site_parameter.get_value('SMS_USERNAME')
@@ -21,7 +26,7 @@ exec clicksend_pkg.create_purge_job;
 begin
   clicksend_pkg.send_sms
     (p_sender  => 'tester'
-    ,p_mobile  => '+61408288568' -- +61411111111 is a free test number, no msg will be sent or charged
+    ,p_mobile  => '+61411111111' -- +61411111111 is a free test number, no msg will be sent or charged
     ,p_message => 'testing ' || to_char(systimestamp,'DD/MM/YYYY HH24:MI:SS.FF')
     );
   clicksend_pkg.push_queue;
@@ -32,7 +37,7 @@ end;
 begin
   clicksend_pkg.send_mms
     (p_sender         => 'tester'
-    ,p_mobile         => '+61408288568' -- +61411111111 is a free test number, no msg will be sent or charged
+    ,p_mobile         => '+61411111111' -- +61411111111 is a free test number, no msg will be sent or charged
     ,p_subject        => 'testing mms'
     ,p_message        => 'testing ' || to_char(systimestamp,'DD/MM/YYYY HH24:MI:SS.FF')
     ,p_media_file_url => 'https://s3-ap-southeast-2.amazonaws.com/jk64/jk64logo.jpg'
@@ -44,11 +49,12 @@ end;
 
 begin
   clicksend_pkg.send_voice
-    (p_phone_no     => '+61892741627' -- +61411111111 is a free test number, no msg will be sent or charged
-    ,p_message      => 'Well, hello there. This message was sent on ' || to_char(systimestamp,'fmDay DD Month YYYY "at" HH:MI am, SS "seconds"')
-                    || '. Lots of hugs and kisses from Jeff'
-    ,p_voice_lang   => 'en-au'
-    ,p_voice_gender => 'male'
+    (p_phone_no     => '+61408388532' -- +61411111111 is a free test number, no msg will be sent or charged
+    ,p_message      => 'Hello. This message was sent on '
+                    || to_char(systimestamp,'fmDay DD Month YYYY "at" HH:MI am, SS "seconds"')
+                    || '.'
+    ,p_voice_lang   => 'en-gb'
+    ,p_voice_gender => 'female'
     ,p_schedule_dt  => sysdate
     );
   clicksend_pkg.push_queue;
@@ -60,17 +66,11 @@ select clicksend_pkg.get_account_details from dual;
 
 select clicksend_pkg.get_credit_balance from dual;
 
-select * from table(clicksend_pkg1.get_languages);
+select * from table(clicksend_pkg.get_languages);
 
-select * from table(clicksend_pkg1.get_countries);
+select * from table(clicksend_pkg.get_countries);
 
-select * from table(clicksend_pkg1.get_sms_history(sysdate-100,sysdate));
-
-select * from clicksend_msg_log where clicksend_messageid = 'A0589BBC-1472-4977-B7F3-61AEBBF9B64D';
-
-'20/05/2016 07:31:03.000000000 AM'
-
-select systimestamp-sys_extract_utc(systimestamp) from dual;
+select * from table(clicksend_pkg.get_sms_history(sysdate-100,sysdate));
 
 exec clicksend_pkg.drop_job;
 
