@@ -329,8 +329,8 @@ procedure send_msg (p_payload in out nocopy t_clicksend_msg) as
     exception
       when others then
         -- log the parse problem but don't stop the logging
-        dbms_output.put_line(SQLERRM);
-        dbms_output.put_line(resp_text);
+        sys.dbms_output.put_line(SQLERRM);
+        sys.dbms_output.put_line(resp_text);
     end;
 
     insert into clicksend_msg_log values log;
