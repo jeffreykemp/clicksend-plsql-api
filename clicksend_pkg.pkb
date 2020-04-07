@@ -151,7 +151,7 @@ procedure prod_check
   (p_is_prod            out boolean
   ,p_non_prod_recipient out varchar2
   ) is
-  prod_instance_name mailgun_settings.setting_value%type;
+  prod_instance_name clicksend_settings.setting_value%type;
 begin
   
   prod_instance_name := setting(setting_prod_instance_name);
