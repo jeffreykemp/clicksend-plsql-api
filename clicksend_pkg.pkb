@@ -1,5 +1,5 @@
 create or replace package body clicksend_pkg as
-/* Clicksend API v0.2
+/* Clicksend API v0.3
   https://github.com/jeffreykemp/clicksend-plsql-api
   by Jeffrey Kemp
 */
