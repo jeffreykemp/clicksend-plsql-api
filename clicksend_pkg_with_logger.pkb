@@ -1,5 +1,5 @@
 create or replace package body clicksend_pkg as
-/* Clicksend API v0.2
+/* Clicksend API v0.3
   https://github.com/jeffreykemp/clicksend-plsql-api
   by Jeffrey Kemp
   Instrumented using Logger https://github.com/OraOpenSource/Logger
@@ -194,7 +194,7 @@ procedure prod_check
   ) is
   scope  logger_logs.scope%type := scope_prefix || 'prod_check';
   params logger.tab_param;
-  prod_instance_name mailgun_settings.setting_value%type;
+  prod_instance_name clicksend_settings.setting_value%type;
 begin
   logger.log('START', scope, null, params);
   
