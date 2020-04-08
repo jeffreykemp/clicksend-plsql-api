@@ -4,11 +4,11 @@ create or replace package body clicksend_pkg as
   by Jeffrey Kemp
 */
 
-queue_name             constant varchar2(30) := sys_context('userenv','current_schema')||'.clicksend_queue';
-queue_table            constant varchar2(30) := sys_context('userenv','current_schema')||'.clicksend_queue_tab';
+queue_name             constant varchar2(500) := sys_context('userenv','current_schema')||'.clicksend_queue';
+queue_table            constant varchar2(500) := sys_context('userenv','current_schema')||'.clicksend_queue_tab';
 job_name               constant varchar2(30) := 'clicksend_process_queue';
 purge_job_name         constant varchar2(30) := 'clicksend_purge_logs';
-payload_type           constant varchar2(30) := sys_context('userenv','current_schema')||'.t_clicksend_msg';
+payload_type           constant varchar2(500) := sys_context('userenv','current_schema')||'.t_clicksend_msg';
 max_dequeue_count      constant integer := 1000; -- max messages processed by push_queue in one go
 
 -- defaults to use if init() not used to set these settings
