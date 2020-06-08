@@ -7,7 +7,7 @@ begin
   clicksend_pkg.init
     (p_clicksend_username   => site_parameter.get_value('SMS_USERNAME')
     ,p_clicksend_secret_key => site_parameter.get_value('SMS_SECRET_KEY')
-    ,p_api_url              => 'http://api.jk64.com/clicksend/v3/'
+    ,p_api_url              => 'http://api.yourproxy.com/clicksend/v3/'
     );
 end;
 /
